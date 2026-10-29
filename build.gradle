@@ -1,0 +1,36 @@
+plugins {
+    id 'base'
+    id 'fabric-loom' version '1.6-SNAPSHOT' apply false
+    id 'com.google.protobuf' version '0.9.6' apply false
+}
+
+allprojects {
+    group = 'dev.kizuna.meridian.combat'
+    version = '0.1.1-SNAPSHOT'
+}
+subprojects {
+    apply plugin: 'java-library'
+    repositories { mavenCentral() }
+    java {
+        toolchain { languageVersion = JavaLanguageVersion.of(17) }
+        withSourcesJar()
+    }
+    base.archivesName = "${rootProject.name}-${project.name}"
+    tasks.withType(JavaCompile).configureEach {
+        options.release = 17
+        options.encoding = 'UTF-8'
+    }
+    tasks.withType(Jar).configureEach {
+        from(rootProject.files('LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md'))
+    }
+}
+tasks.named('assemble') { dependsOn ':shared:assemble', ':core:assemble', ':fabric:assemble' }
+tasks.named('check') { dependsOn ':shared:check', ':core:check', ':fabric:check', 'checkDocs' }
+tasks.register('test') {
+    group = 'verification'
+    dependsOn ':shared:test', ':core:test', ':fabric:test'
+}
+tasks.register('checkDocs', Exec) {
+    group = 'verification'
+    commandLine 'python3', 'scripts/check_docs.py'
+}

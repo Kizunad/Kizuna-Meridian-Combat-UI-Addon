@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "meridian_combat_client_test",
+  "version": "1.0.0",
+  "name": "战斗 HUD 客户端截图测试",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["dev.kizuna.meridian.combat.fabric.client.CombatHudClientTest"]
+  }
+}

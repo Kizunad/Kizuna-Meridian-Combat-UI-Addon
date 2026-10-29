@@ -1,0 +1,95 @@
+plugins { id 'fabric-loom' }
+description = '客户端架势与命令、服务端施放和已学列表同步。'
+repositories { maven { url = 'https://maven.fabricmc.net/' } }
+
+def techniqueDirectory = rootProject.file(providers.gradleProperty('meridianTechniqueDir')
+        .getOrElse('../Kizuna-Meridian-Technique-Framework'))
+dependencies {
+    minecraft 'com.mojang:minecraft:1.20.1'
+    mappings 'net.fabricmc:yarn:1.20.1+build.10:v2'
+    modImplementation 'net.fabricmc:fabric-loader:0.16.10'
+    modImplementation 'net.fabricmc.fabric-api:fabric-api:0.92.3+1.20.1'
+    implementation project(':core')
+    implementation 'local.meridian.technique:server'
+    modImplementation files(new File(techniqueDirectory,
+            'fabric/build/libs/kizuna-meridian-technique-framework-fabric-0.1.0-SNAPSHOT.jar'))
+    include project(':core')
+    include project(':shared')
+    include implementation('com.google.protobuf:protobuf-java:4.36.2')
+    testImplementation 'junit:junit:4.13.2'
+}
+test { useJUnit() }
+tasks.withType(JavaExec).configureEach {
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+}
+processResources {
+    inputs.property 'version', project.version
+    filesMatching('fabric.mod.json') { expand version: project.version }
+}
+loom {
+    mods { meridian_combat { sourceSet sourceSets.main } }
+    runs {
+        client { runDir 'build/playtest' }
+        server { runDir 'build/server' }
+    }
+}
+sourceSets {
+    clientTest {
+        compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
+        runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
+    }
+    gametest {
+        compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
+        runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
+    }
+}
+loom {
+    mods {
+        meridian_combat_test { sourceSet sourceSets.gametest }
+        meridian_combat_client_test { sourceSet sourceSets.clientTest }
+    }
+    runs {
+        clientTest {
+            client()
+            source sourceSets.clientTest
+            runDir 'build/clienttest'
+            programArgs '--quickPlaySingleplayer', 'combat-hud-test', '--width', '1280', '--height', '960'
+        }
+        gametest {
+            server()
+            name '战斗输入 GameTest'
+            source sourceSets.gametest
+            runDir 'build/gametest'
+            vmArg '-Dfabric-api.gametest'
+            vmArg '-Dfabric-api.gametest.report-file=build/gametest-results.xml'
+        }
+    }
+}
+
+// HUD 截图使用完整安装环境；服务端契约测试仍使用其独立测试宿主。
+if (providers.gradleProperty('combatFullAssembly').isPresent()) {
+    apply from: '../../Kizuna-Meridian-Mod-Framework/scripts/full-assembly.gradle'
+    dependencies {
+        localRuntime files('../../Kizuna-Meridian-Human-Addon/client/build/libs/kizuna-meridian-human-addon-client-0.1.0-SNAPSHOT.jar')
+    }
+}
+tasks.register('prepareClientTestWorld', Copy) {
+    from layout.buildDirectory.dir('gametest/world')
+    into layout.buildDirectory.dir('clienttest/saves/combat-hud-test')
+    exclude 'session.lock'
+}
+tasks.named('runClientTest') {
+    dependsOn tasks.named('prepareClientTestWorld')
+    def report = layout.buildDirectory.file('clienttest-results.txt')
+    doFirst {
+        if (!providers.gradleProperty('combatFullAssembly').isPresent()) {
+            throw new GradleException('HUD 客户端截图需要 -PcombatFullAssembly 完整装配')
+        }
+        report.get().asFile.text = 'success=false\n'
+    }
+    doLast {
+        if (!report.get().asFile.text.startsWith('success=true')) {
+            throw new GradleException("HUD 客户端验收失败：${report.get().asFile}")
+        }
+    }
+}

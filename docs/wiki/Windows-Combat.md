@@ -1,0 +1,216 @@
+# Windows 战斗整套试玩指南
+
+实例：`D:\Minecraft\Meridian-Animation-Integrated-20261021`。
+候选由 19 个当前工作区构建，包含未提交修改、PA Mobs-Addon、正式基础功法、破门斩与调试库 `meridian_debug`，已移除试玩功法目录。
+来源提交、源码摘要、JAR 哈希及各仓构建日志见候选的 `manifest.json`、`build-logs/`。
+本页中的候选路径占位符由打包脚本替换，实例根指南指向具体已验证候选。
+
+## 启动与切换
+
+先正常退出当前游戏；不要强行结束已有客户端，也不要同时使用同一游戏目录。
+在 PowerShell 执行（只切换战斗参数，不改 `play.args`、原脚本或任何存档）：
+
+```powershell
+Set-Location "D:\Minecraft\Meridian-Animation-Integrated-20261021"
+$backup = ".\combat.args.before-final-" + (Get-Date -Format "yyyyMMdd-HHmmss")
+Copy-Item -LiteralPath ".\combat.args" -Destination $backup
+Copy-Item -LiteralPath "__CANDIDATE_ARGS__" -Destination ".\combat.args"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
+```
+
+此后直接运行实例根 `Start-combat.ps1`；脚本检查重复实例，记录 `combat.pid`。
+候选自己的 `remapClasspath.txt` 保持原处，无需复制到实例根。
+游戏目录为 `combat/`，世界在 `combat/saves/`。
+回滚时正常退出，再把上述备份复制回 `combat.args`。
+
+## 创建试玩世界、读卷与资源准备
+
+创建单人创造世界并打开「允许作弊」。已有世界可 ESC → 对局域网开放 → 允许作弊：开 → 创建局域网世界。
+使用原版世界，先确保所在位置安全；以下调试命令需要权限等级 2：
+
+```text
+/gamemode creative
+/difficulty normal
+/meridian opening complete @s all
+/meridian zhenyuan fill
+/gamerule meridianTechniquePlayerBreakBlocks true
+/gamerule mobGriefing true
+```
+
+创造物品栏找「功法」页（也可搜索「基础功法」「破门斩」），取得：
+
+- 基础功法·调息卷、基础功法·轻步卷、基础功法·蓄力卷。
+- 破门斩·上卷·木门：学会叩门、破门、撞门三式。
+
+手持卷轴右键学习，成功后打开只读阅读界面：书名·卷名、式名称、说明、前置卷。
+长文用滚轮；合上按钮、纸外点击、ESC、背包键、右键或使用键均可关闭，键位跟随改绑。
+界面显示已学会提示、各式说明与目录数值，卷末列出架势与填槽命令；合上按钮使用生成纹理。
+创造模式不消耗卷轴，生存模式消耗一份。再次使用已学卷不重复学习。
+缺失专属背景时使用通用纸面并为该资源记录一次警告。
+
+## 填槽、架势与视角
+
+学会后输入客户端命令：
+
+```text
+/meridian_combat slot set 1 meridian_basic_techniques:light_step
+/meridian_combat slot set 2 meridian_basic_techniques:charge
+/meridian_combat slot set 3 meridian_basic_techniques:breath
+/meridian_combat slot set 4 meridian_door_breaker:cleave
+/meridian_combat slot set 5 meridian_door_breaker:knock
+/meridian_combat slot set 6 meridian_door_breaker:ram
+/meridian_combat slot list
+```
+
+清槽用 `/meridian_combat slot clear 1`。旧 trial 槽会显示失效，应清空或改成已学的正式 ID。
+`set`、`clear` 的槽号补全 1–10，功法 ID 补全当前服务器已学列表。
+调试授予可用 `/meridian_technique learn @s <id>`；ID 补全当前目录的书、卷、式，整书一次原子学会。
+
+- R 进入/退出架势，即使没有学会或填槽也能进入。
+- 架势内 1–9 与 0 对应十槽；1–9 跟随原版快捷栏键位，滚轮仍可换持物。
+- V 在第一人称/越肩之间切换；R、V、0 可在「控制 → 经脉战斗」改键。
+- 架势内 F5 被消费，使用 V 切换；退出架势恢复原来的原版视角。
+- 越肩时鼠标绕看，WASD 按镜头移动并带动人物转向；攻击沿人物朝向。
+- 越肩准星不是攻击射线；需调整俯仰时先切回第一人称。
+- 聊天和背包打开时暂停施放；死亡、旁观、断线退出架势。
+- 下肢损毁只会拒绝行走、疾跑的身体占用，不会暂停整个身体；原版移速暂不受疲劳或黑腿调整。若聊天明确提示身体已暂停，退出世界后重新加入即可重新认领原身体，伤势和真元保留；仍失败时保留日志检查必装模组，不要删除身体存档。暂停期间功法同步清空已学投影并停止轮询，治疗也不会退回原版回血。
+
+架势中快捷栏上方出现中性深灰十槽，实际键名位于槽下；空槽不写字。
+默认槽 1 显示 `1`，槽 10 显示 `0`；验收截图的 `Q`/`Z` 是测试专门改绑，用于验证实际键名显示，
+不是正式默认键位。已有 `options.txt` 的个人改键会继续生效。
+可用、冷却去色与秒数、失败暗红边与小叉、施放高亮各有区分，按键有两帧反馈；F1 隐藏 HUD。
+空槽或施放被拒绝会在动作栏提示；槽位按世界/服务器保存，视角模式跨档记忆。
+
+## 玩家效果与卫道士
+
+轻步：按移动键配合 1 可向输入方向跃移，不按移动键则沿人物前方。
+蓄力：2 启动力量曲线，先增强、回落，再进入虚脱，最终恢复；不是永久属性提升。
+调息：3 帮助恢复疲劳。费用不足可再次执行 `/meridian zhenyuan fill`，但补元不会消除疲劳。
+
+手持铁斧，对准两格内的木门按 4，等待约 3.2 秒起手后劈开；铁门保持不动。
+创造不扣耐久；切生存后铁斧末击扣 3 耐久。生存测试前先备好安全场地。
+对准三格内生物按 5，在 0.90、1.25、1.70 秒连敲三下；钝击倍率依次为 0.3、0.3、0.9，合计 1.5。
+主手铁斧的每击护甲前剂量为 `9 × 本击倍率 × 当时肌肉系数`；目标离开范围后，后续打击会落空。
+开启 `/meridian_debug damage watch on` 后，命中三次应出现三条日志，黑肢体命中也逐击记录蔓延。
+轻步与撞门等四块腿肌功法的有效腿力门槛为 510 N，普通走动后仍可施放，重疲劳或重伤仍会拒绝。
+疲劳、伤势、护甲等会影响最终伤害；两手可用时部分招式改为双手判定。
+破门斩八式从起手到收势均为 0.4 倍移速，玩家仍可移动，类人仍会寻路；冲量保持原值。
+收势、承接、打断、死亡与断线会移除对应施放的临时限速。
+
+在创造栏「类人」页取「卫道士刷怪蛋（真炁）」并右键方块，或使用以下命令直接生成真炁卫道士。
+物种与档位都有补全，位置沿用原版坐标；省略位置则在命令源位置生成。命令需要权限 2：
+
+```text
+/meridian humanoid summon vindicator true_qi ~ ~ ~5
+/meridian humanoid inspect @e[type=minecraft:vindicator,sort=nearest,limit=1]
+/give @s meridian_humanoid:vindicator_true_qi_spawn_egg
+```
+
+生成反馈包含实体名称、档位与 UUID；`inspect` 应输出 `档位=TRUE_QI`。
+它会带原版铁斧，自动学会上卷和中卷，另有 UUID 分桶决定的下卷机会。
+要测试游炁可将 `true_qi` 改为 `wandering_qi`；七种生人均有两档，共 14 个蛋。
+普通原版 `/summon minecraft:vindicator` 仍随机抽档；不支持虚构的 `Realm` NBT。
+测试清理使用生成反馈中的实际 UUID（替换下面占位符），避免误删其他卫道士：
+
+```text
+/kill <生成反馈中的UUID>
+```
+
+确认真炁后保持普通难度、`mobGriefing true`，切换 `/gamemode survival` 让它以玩家为目标。
+它会举斧起手并自行选择破门斩；让它在视线通畅时起手劈门式，再在前方两格内放木门，可观察木门被劈开。
+关闭木门挡住视线时 AI 可能不决策；并非每次攻击都选择劈门。
+测试后切回创造并按 UUID 清理测试实体即可。
+
+## 透视镜、伤害观察与恢复
+
+调试库需要权限等级 2（单人开启作弊或服务器 OP）。创造栏「调试」页可取肢体透视镜，也可输入：
+
+```text
+/give @s meridian_debug:limb_lens
+```
+
+手持透视镜对准已有 Meridian 身体的玩家或类人生物，每 10 tick 更新部位 HP 条、总 HP、体力、真元和
+已有经脉状态。对实体右键打印完整快照；潜行右键查看自己。
+
+伤害观察在聊天中显示本人参与的双向伤害：攻击方、受击方、伤害种类、命中部位、原始与结算剂量、
+来源 ID 和部位剩余 HP。
+
+命中已毁部位或一次伤害超过其剩余 HP 时，日志额外显示“溢出量 × 来源系数 → 各接收部位剂量”。
+手臂（含前臂、手）系数 0.7，腿（含小腿、足）1.0，腹部 1.5，其余部位 1.0；
+按未毁部位的实际 HP 上限分配，接收方护甲不重复减伤。玩家及七类生人默认开启，
+可在对应游戏目录的 `config/meridian-human-damage.toml` 分别修改实体开关与模板系数，重启后生效。
+
+可限制到当前选中的目标，结束后关闭：
+
+```text
+/meridian_debug damage watch on
+/meridian_debug damage watch on @e[type=minecraft:vindicator,sort=nearest,limit=1]
+/meridian_debug damage watch off
+```
+
+恢复命令只操作已有权威身体，支持玩家和类人生物。省略模式等同 `all`；其余模式为 `health`、`limbs`、
+`stamina`、`zhenyuan`。例如恢复自己、最近卫道士或单独补充真元：
+
+```text
+/meridian_debug heal @s all
+/meridian_debug heal @e[type=minecraft:vindicator,sort=nearest,limit=1] all
+/meridian_debug heal @s zhenyuan
+```
+
+单部位恢复用 `/meridian_debug heal @s limb <部位> [数值]`，部位 ID 按 Tab 从目标实际身体补全；
+省略数值时补满该部位，提供数值时按指定剂量恢复。
+
+## 三式新动画试玩
+
+准备步骤中的开脉与补元后，右键阅读上卷，或直接学卷、填槽：
+
+```text
+/meridian_technique learn @s meridian_door_breaker:upper
+/meridian_combat slot set 4 meridian_door_breaker:cleave
+/meridian_combat slot set 5 meridian_door_breaker:knock
+/meridian_combat slot set 6 meridian_door_breaker:ram
+/give @s minecraft:iron_axe
+```
+
+按 R 进入架势、V 切越肩，手持斧头朝向目标。5 为单手短叩，1.70 秒命中；
+4 为双手重劈，3.20 秒命中；6 为冲步接横撩，2.40 秒命中。
+撞门在 1.55–2.25 秒原地迈步配合服务端冲量；施放仍为 0.4 倍移速。
+将斧头按 F 换至副手并让主手留空，三式均播放副手版；皮肤设置中的主手选「左手」可观察运行时镜像。
+架势左护手位已外移，副手斧头不再贴住脸部。木门可手动放置，也可站定后执行：
+
+```text
+/setblock ~ ~ ~2 minecraft:oak_door[facing=north,half=lower]
+/setblock ~ ~1 ~2 minecraft:oak_door[facing=north,half=upper]
+/meridian humanoid summon vindicator true_qi ~ ~ ~5
+/gamerule mobGriefing true
+```
+
+木门命令沿世界 +Z 方向放置，转向门再施放 4。卫道士的出招由距离、资源、受击等情境评分选择，
+不会按三式固定轮播；在生存模式让它取得目标，可观察同样的专属片段与劈门。
+需要副手观察时可对刚生成的最近卫道士执行：
+
+```text
+/item replace entity @e[type=minecraft:vindicator,sort=nearest,limit=1] weapon.mainhand with minecraft:air
+/item replace entity @e[type=minecraft:vindicator,sort=nearest,limit=1] weapon.offhand with minecraft:iron_axe
+```
+
+## 验证、日志与已知问题
+
+基础功法仓完整装配覆盖真实卷轴、战斗协议、位移、力量曲线、
+木门/耐久、叩门实伤，以及真炁卫道士 AI 对在线玩家施放和劈门。
+详细伤害公式、权限和时序边界仍由各仓 GameTest 覆盖。
+
+Windows 烟测仅到主菜单：探针确认真实 TitleScreen 与资源加载完成，核对模组清单和 Mixin 错误，
+随后探针自动退出本次客户端；不截图、OCR、不进入世界。
+候选 `windows-smoke.json` 记录实际结果；打包时清单中的 false 不代表后续烟测结论。
+按键、镜头、阅读排版和 HUD 的实际游玩体验仍需用户进世界观察。
+
+- 叩门、破门、撞门主副手六段专属动画已接入玩家与卫道士，打击时刻已与目录对齐。
+  破盾、横扫、掩门、连门、万门一斩尚无专属动画，仍借用对应主副手挥砍。
+- 类人待机、走跑、举斧、拉弩、施法、喝药与交易已使用 PA；举斧借用三叉戟预备段，施法借用蓄力，
+  交易借用使用物品，受击借用单手格挡受击。未新制动作；主副手、盔甲、头饰与头戴旗帜继续可见。
+- 离线启动参数可能出现认证 HTTP 401、Realms 不可用及可选类/音效/shader 警告；不代表正版多人登录已验收。
+- 只验证本整套工作区装配，未验收任意第三方模组组合。
+- 正式运行日志：`combat/logs/latest.log`、`debug.log`；启动日志：实例根 `combat-stdout.log`、`combat-stderr.log`。
+- 候选烟测证据与实际日志路径见 `__CANDIDATE_DIRECTORY__/windows-smoke.json`；启动输出、主菜单标记与 PID 同在候选内。
+- 配置：`combat/config/kizuna-meridian-combat.json`；退出游戏后再编辑镜头参数。

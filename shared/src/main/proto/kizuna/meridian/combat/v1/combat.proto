@@ -1,0 +1,21 @@
+syntax = "proto3";
+package kizuna.meridian.combat.v1;
+option java_package = "dev.kizuna.meridian.combat.protocol.pb";
+option java_outer_classname = "CombatMessages";
+
+// 客户端只能提交功法标识和水平输入方向；不携带费用或身体身份。
+message TechniquePress {
+  string technique_id = 1;
+  float move_x = 2;
+  float move_z = 3;
+}
+// 登录、已学变化和状态刷新时同步完整投影，空列表同样具有覆盖语义。
+message KnownTechniques { repeated KnownTechnique techniques = 1; }
+message KnownTechnique {
+  string id = 1;
+  string name = 2;
+  string icon_id = 3;
+  int64 cooldown_remaining_millis = 4;
+  int64 cooldown_total_millis = 5;
+  string unavailable_reason = 6;
+}

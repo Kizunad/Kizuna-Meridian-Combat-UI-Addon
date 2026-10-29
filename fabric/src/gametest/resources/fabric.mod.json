@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "meridian_combat_test",
+  "version": "1.0.0",
+  "name": "战斗输入服务端测试",
+  "environment": "server",
+  "entrypoints": {
+    "fabric-gametest": [
+      "dev.kizuna.meridian.combat.gametest.CombatGameTest",
+      "dev.kizuna.meridian.combat.gametest.CombatViewGameTest"
+    ],
+    "meridian_technique_catalog": ["dev.kizuna.meridian.combat.gametest.CombatTestHost"],
+    "meridian_technique_host": ["dev.kizuna.meridian.combat.gametest.CombatTestHost"]
+  }
+}

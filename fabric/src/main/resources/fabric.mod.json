@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "meridian_combat",
+  "version": "${version}",
+  "name": "Kizuna 经脉战斗 UI",
+  "description": "战斗架势、十槽本地配置与逐次施放",
+  "authors": ["Kizunad"],
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "environment": "*",
+  "mixins": ["meridian_combat.client.mixins.json"],
+  "entrypoints": {
+    "main": ["dev.kizuna.meridian.combat.fabric.CombatFabric"],
+    "client": ["dev.kizuna.meridian.combat.fabric.client.CombatClient"]
+  },
+  "depends": {
+    "java": ">=17",
+    "minecraft": "1.20.1",
+    "fabricloader": ">=0.16.10",
+    "fabric-api": "*",
+    "meridian_technique": "*"
+  }
+}
