@@ -14,32 +14,17 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 CODE = ROOT.parent
 INSTANCE = Path("/mnt/d/Minecraft/Meridian-Animation-Integrated-20261021")
-VERSION = "0.1.0-SNAPSHOT"
-COMBAT_VERSION = "0.1.1-SNAPSHOT"
-# 顺序满足文件形式的跨仓编译依赖；构建直接读取工作区，包含未提交源文件。
+# 仓库、模块与产物名只认 Framework 的统一装配清单，开发运行的 full-assembly.gradle 读同一份。
+MANIFEST = json.loads((CODE / "Kizuna-Meridian-Mod-Framework/scripts/assembly.json").read_text(encoding="utf-8"))
+REPOSITORIES = {repository["directory"]: repository for repository in MANIFEST["repositories"]}
+# 清单顺序满足文件形式的跨仓编译依赖；没有 candidate 的模块（如只在专用服务端加载的 JAR）不进客户端候选。
+# 构建直接读取工作区，包含未提交源文件。
 PROJECTS = {
-    "Kizuna-Meridian-Mod-Framework": [("server", "library"), ("client", "library")],
-    "Kizuna-Meridian-Qi-Variants-Addon": [("server", "library"), ("shared", "library")],
-    "Kizuna-Meridian-Technique-Framework": [("server", "library"), ("shared", "library"), ("fabric", "mod")],
-    "Kizuna-Inventory-UI-Framework": [("", "mod"), ("server", "mod")],
-    "Kizuna-Players-Animation": [("", "mod")],
-    "Kizuna-Players-Animation-Mobs-Addon": [("", "mod")],
-    "Kizuna-Meridian-Items-Addon": [("", "named-library")],
-    "Kizuna-Meridian-Progression-Addon": [
-        ("server", "library"), ("shared", "library"), ("fabric", "mod"), ("client", "mod")],
-    "Kizuna-Meridian-UI-Addon": [("server", "library"), ("client", "mod")],
-    "Kizuna-Meridian-Vanilla-Damage-Addon": [("server", "library"), ("fabric", "mod")],
-    "Kizuna-Meridian-Vanilla-Healing-Addon": [("server", "library"), ("fabric", "mod")],
-    "Kizuna-Meridian-Human-Addon": [
-        ("server", "library"), ("shared", "library"), ("client", "library"), ("fabric", "mod")],
-    "Kizuna-Meridian-Human-UI-Addon": [("client", "mod")],
-    "backpack-and-storage-3D": [("server", "mod"), ("client", "mod")],
-    "Kizuna-Meridian-Vanilla-Humanoid-Threatening": [("server", "library"), ("fabric", "mod")],
-    "Kizuna-Meridian-Debug-Addon": [("server", "library"), ("fabric", "mod")],
-    "Kizuna-Meridian-Basic-Techniques-Addon": [("fabric", "data-mod")],
-    "Kizuna-Meridian-Door-Breaker-Addon": [("fabric", "data-mod")],
-    "Kizuna-Meridian-Combat-UI-Addon": [("core", "library"), ("shared", "library"), ("fabric", "mod")],
+    repository["directory"]: [(module["path"], module["candidate"])
+                              for module in repository["modules"] if "candidate" in module]
+    for repository in MANIFEST["repositories"]
 }
+WORKSPACE_MARKERS = ("kizuna-", "meridian-") + tuple(repository["project"] for repository in MANIFEST["repositories"])
 FORBIDDEN = "combat_trial"
 
 
@@ -74,13 +59,12 @@ def workspace_state(repository):
 
 
 def artifact(repository, module, kind):
-    # 运行于 named 开发命名空间，所有 Fabric 类使用 remap 前的 dev JAR。
-    basename = repository.lower()
-    if repository == "backpack-and-storage-3D":
-        basename = "backpack-storage-3d"
+    # 运行于 named 开发命名空间，所有 Fabric 类使用 remap 前的 dev JAR；文件名前缀与版本取自装配清单。
+    entry = REPOSITORIES[repository]
+    basename = entry["project"]
     if module:
         basename += "-" + module
-    version = COMBAT_VERSION if repository == ROOT.name else VERSION
+    version = entry.get("version", MANIFEST["version"])
     development = kind in ("mod", "named-library")
     directory = "devlibs" if development else "libs"
     suffix = "-dev" if development else ""
@@ -129,8 +113,7 @@ def inherited_classpath(arguments, sources):
     for entry in arguments[index].split(";"):
         path = local(entry)
         identity = mod_id(path)
-        workspace_library = any(marker in path.name.lower() for marker in
-                                ("kizuna-", "meridian-", "backpack-storage-3d"))
+        workspace_library = any(marker in path.name.lower() for marker in WORKSPACE_MARKERS)
         if identity in identities or workspace_library or FORBIDDEN in (identity or ""):
             removed.append(entry)
         else:

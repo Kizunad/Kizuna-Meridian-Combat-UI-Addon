@@ -3,7 +3,9 @@
 此入口只准备 Windows Native 候选，不替换实例根的 `combat.args`、`play.args`、启动脚本或存档。
 候选包含当前工作区的 Framework、Human、UI、Human-UI、Items、Damage、Healing、Progression、
 Qi-Variants、Threatening、Debug、功法库、基础功法、破门斩、战斗 UI、Inventory UI、Players Animation、
-Players Animation Mobs-Addon 与 BS3D。
+Players Animation Mobs-Addon、BS3D 及其 Vanilla、Pocket、Weights 附属、Burden、Humanoid Dummy 与 Humanoid Taunts。
+仓库、模块和装入方式只认 Framework 仓的统一装配清单 `scripts/assembly.json`，开发运行的 `full-assembly.gradle` 读同一份；
+清单中没有 `candidate` 的模块不进客户端候选，例如 bs3d 附属只在专用服务端加载的 server JAR。
 已取消的试玩功法目录不参与构建或类路径。
 
 在战斗 UI 仓执行：
@@ -14,11 +16,12 @@ python3 "scripts/package_windows_candidate.py"
 
 默认实例是 `/mnt/d/Minecraft/Meridian-Animation-Integrated-20261021`，可用 `--instance` 指定其他 WSL 盘符目录。
 每次在 `libraries/combat-current-时间戳/` 下创建新目录；`--name` 可指定单层目录名，已有目录会拒绝覆盖。
-依次在 19 个相邻仓运行 `bash gradlew build --console=plain`，任一失败即停止并保留候选内的构建日志。
+按清单顺序依次在 25 个相邻仓运行 `bash gradlew build --console=plain`，任一失败即停止并保留候选内的构建日志。
 这会使用未提交源文件，不使用隔离提交快照。
 
 脚本从原 `play.args` 继承外部 Minecraft、Fabric、Java 与 Windows 原生库，替换所有工作区 JAR，
-增加 Qi-Variants、Threatening、Debug、PA Mobs-Addon 和四个功法相关模块，
+增加 Qi-Variants、Threatening、Debug、PA Mobs-Addon、四个功法相关模块、bs3d 三个附属的客户端 JAR、
+Burden、Humanoid Dummy 与 Humanoid Taunts，
 移除旧 `-Dkiui.smoke` 标记以正常加载用户偏好。
 Fabric 模块使用 named 的 `build/devlibs/*-dev.jar`，
 纯 Java 库与基础功法、破门斩的无类数据包使用 `build/libs`；Items 的宿主库含 Minecraft 类型，也使用 named dev JAR。

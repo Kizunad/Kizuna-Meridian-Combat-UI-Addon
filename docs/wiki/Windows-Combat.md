@@ -1,7 +1,7 @@
 # Windows 战斗整套试玩指南
 
 实例：`D:\Minecraft\Meridian-Animation-Integrated-20261021`。
-候选由 19 个当前工作区构建，包含未提交修改、PA Mobs-Addon、正式基础功法、破门斩与调试库 `meridian_debug`，已移除试玩功法目录。
+候选由 25 个当前工作区构建，包含未提交修改、PA Mobs-Addon、bs3d 三个附属、Burden、Humanoid Dummy、Humanoid Taunts、正式基础功法、破门斩与调试库 `meridian_debug`，已移除试玩功法目录。
 来源提交、源码摘要、JAR 哈希及各仓构建日志见候选的 `manifest.json`、`build-logs/`。
 本页中的候选路径占位符由打包脚本替换，实例根指南指向具体已验证候选。
 
