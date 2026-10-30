@@ -83,7 +83,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 
 ## 玩家效果与卫道士
 
-轻步：按移动键配合 1 可向输入方向跃移，不按移动键则沿人物前方。
+轻步：按槽 1 施放后获得 20 秒“轻身”；地面按跳跃键向准星处跃进，潜行加跳跃仍为普通跳。
+每跳起点到落点的直线最远 7 格：平地最远 7 格，上两三格高的墙头时水平距离相应缩短，往下跳不占距离。
+看向这个范围内的地面或墙头会出现淡淡的落点描边；准星太近允许短跳，看得更远时落在 7 格处附近。
+弧线贴低、飞行约半秒（平地 6 格约 10 tick），落地稍停 0.3 秒即可按住跳跃键继续连跳。
+每次跃步只耗腿部体力，重疲劳时提示“腿脚乏力”并退回普通跳。状态没有粒子，物品栏和 HUD 显示羽毛图标。
+可直接测试：`/effect give @s meridian_basic_techniques:light_body 20 0`。
+用 `/meridian_debug damage watch on` 观察：正常跃步落地不摔伤，跌落超过预定落点的部分仍受伤。
+卫道士也可用 `/effect give @e[type=minecraft:vindicator,limit=1,sort=nearest] meridian_basic_techniques:light_body 20 0`
+给予轻身；生存模式被其锁定后，它会跃到玩家身前一两格再出招。起跳暂借 PA `technique_dash`，专属动画待后续制作。
 蓄力：2 启动力量曲线，先增强、回落，再进入虚脱，最终恢复；不是永久属性提升。
 调息：3 帮助恢复疲劳。费用不足可再次执行 `/meridian zhenyuan fill`，但补元不会消除疲劳。
 
@@ -92,7 +100,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 对准三格内生物按 5，在 0.90、1.25、1.70 秒连敲三下；钝击倍率依次为 0.3、0.3、0.9，合计 1.5。
 主手铁斧的每击护甲前剂量为 `9 × 本击倍率 × 当时肌肉系数`；目标离开范围后，后续打击会落空。
 开启 `/meridian_debug damage watch on` 后，命中三次应出现三条日志，黑肢体命中也逐击记录蔓延。
-轻步与撞门等四块腿肌功法的有效腿力门槛为 510 N，普通走动后仍可施放，重疲劳或重伤仍会拒绝。
+轻步、撞门、掩门、连门和万门一斩均由六块腿肌平分做功，不设绝对腿力门槛。
+正常走动后仍可使用；重疲劳或重伤导致做功预算不足时，撞门起手拒绝，轻身跃步退回普通跳。
 疲劳、伤势、护甲等会影响最终伤害；两手可用时部分招式改为双手判定。
 破门斩八式从起手到收势均为 0.4 倍移速，玩家仍可移动，类人仍会寻路；冲量保持原值。
 收势、承接、打断、死亡与断线会移除对应施放的临时限速。
@@ -107,7 +116,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 ```
 
 生成反馈包含实体名称、档位与 UUID；`inspect` 应输出 `档位=TRUE_QI`。
-它会带原版铁斧，自动学会上卷和中卷，另有 UUID 分桶决定的下卷机会。
+它会带原版铁斧，自动学会调息、轻步、蓄力三卷和破门上卷、中卷，另有 UUID 分桶决定的下卷机会。
 要测试游炁可将 `true_qi` 改为 `wandering_qi`；七种生人均有两档，共 14 个蛋。
 普通原版 `/summon minecraft:vindicator` 仍随机抽档；不支持虚构的 `Realm` NBT。
 测试清理使用生成反馈中的实际 UUID（替换下面占位符），避免误删其他卫道士：
@@ -160,6 +169,39 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 单部位恢复用 `/meridian_debug heal @s limb <部位> [数值]`，部位 ID 按 Tab 从目标实际身体补全；
 省略数值时补满该部位，提供数值时按指定剂量恢复。
 
+## 死亡与重生
+
+先在安全场地准备好已学功法和填槽，再用以下命令测试真实死亡：
+
+```text
+/gamemode survival
+/kill @s
+```
+
+点击原版「重生」。原来的身体、境界、经脉开合、功法和已读卷进度继续保留；
+各部位、组织、器官 HP 至少恢复到上限的 10%，原本更高的 HP 保持。红心同步为约 10%，
+重生后可以正常受伤、治疗。全身做功肌肉疲劳置满，须按原有曲线自然恢复，
+立刻使用腿部功法可能提示疲惫；补元不会清除疲劳。动作栏会提示一次：
+「大难不死，元气大伤，折损一年寿元」。
+
+身体检视信息区首行显示「年龄 / 寿元」，两者均以年为单位，保留一位小数。
+新生样例约为 `18.0 年 / 62.0 年`，第一次重生后约为 `18.0 年 / 61.0 年`。
+每次复活扣一年（31,557,600 秒），数据来源为 Human 的 `meridian-human-revival.toml`。
+真元保留复活前的当前余额；死亡本身按既有规则清账，复活不补元。
+换维度不扣寿元，类人生物死亡后不会自动复活。
+
+调试复活支持默认自己和实体选择器，Tab 可补全；同样扣除 Human 配置的寿元费用：
+
+```text
+/meridian_debug revive
+/meridian_debug revive @s
+/meridian_debug revive @e[type=minecraft:vindicator,sort=nearest,limit=1]
+```
+
+该命令只接受已有死态身体，活体会拒绝；它只复活身体，不替代玩家的原版重生按钮，
+也不重新生成已被原版移除的生物。寿元不足时仍复活，余额扣至零，反馈明确提示耗尽；
+下一次推进生理时间会再次寿尽判死，这是预期规则。
+
 ## 三式新动画试玩
 
 准备步骤中的开脉与补元后，右键阅读上卷，或直接学卷、填槽：
@@ -194,10 +236,62 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 /item replace entity @e[type=minecraft:vindicator,sort=nearest,limit=1] weapon.offhand with minecraft:iron_axe
 ```
 
+## 类人对敌
+
+七种生人都由类人大脑指挥：有威胁时先评估打得过还是该撤，再决定出招、躲、硬抗或拉开；没有威胁时照原版日常。
+以下在普通难度、生存模式试玩，命令需要权限 2。观察施放可用 `/meridian_debug technique status <目标>`，
+观察跃步可用 `/meridian_debug leap watch on <目标>`。
+
+**村民撤退。** 生成一个游炁村民，空手打它一拳：
+
+```text
+/meridian humanoid summon villager wandering_qi ~ ~ ~3
+```
+
+它不会像原版那样乱跑恐慌，而是先放轻步，再背对你跃步拉开到约 12 格外；你走远或停手一阵后它回去干活。
+附近有三个以上村民时，它撤退期间照原版恐慌的节奏召唤铁傀儡。
+
+**村民还手。** 换成真炁村民，给它铁斧并教会叩门，再打它一拳：
+
+```text
+/meridian humanoid summon villager true_qi ~ ~ ~3
+/item replace entity @e[type=minecraft:villager,sort=nearest,limit=1] weapon.mainhand with minecraft:iron_axe
+/meridian_debug technique learn @e[type=minecraft:villager,sort=nearest,limit=1] meridian_door_breaker:knock
+```
+
+自认打得过时它会对你出叩门；血量、最弱部位或双臂力量掉到门槛以下就转为撤退，恢复后再回来。
+
+**调息。** 无威胁、四肢疲劳时它会自己调息：
+
+```text
+/meridian_debug fatigue set @e[type=minecraft:villager,sort=nearest,limit=1] all 0.5
+```
+
+**卫道士突击。** 生成一只真炁卫道士，站在约 6 格外不动：
+
+```text
+/meridian humanoid summon vindicator true_qi ~ ~ ~6
+```
+
+它先蓄力、放轻步，再跃到你身前一两格起手破门式；双臂虚脱后会背向跃步拉开，恢复后再回来。
+
+**两只卫道士互打。** 生成两只真炁卫道士后用调试命令让它们互相仇恨：
+
+```text
+/meridian humanoid summon vindicator true_qi ~ ~ ~4
+/meridian humanoid summon vindicator true_qi ~ ~ ~10
+/meridian_debug aggro @e[type=minecraft:vindicator,sort=nearest,limit=1] @e[type=minecraft:vindicator,sort=furthest,limit=1] mutual
+```
+
+能看到抢在对方起手结束前打断、来袭时侧闪或硬抗、开打前蓄力，以及虚脱后的拉扯。
+
+学卷和行为门槛在 `combat/config/meridian-humanoid-brain.toml`；`log_decisions = true` 时每次决策写一行日志
+（动作与理由）。退出游戏后再编辑。测试后按生成反馈中的 UUID 清理实体。
+
 ## 验证、日志与已知问题
 
 基础功法仓完整装配覆盖真实卷轴、战斗协议、位移、力量曲线、
-木门/耐久、叩门实伤，以及真炁卫道士 AI 对在线玩家施放和劈门。
+木门/耐久、叩门实伤，真炁卫道士由类人大脑对在线玩家施放和劈门，以及村民被玩家打后撤退或还手。
 详细伤害公式、权限和时序边界仍由各仓 GameTest 覆盖。
 
 Windows 烟测仅到主菜单：探针确认真实 TitleScreen 与资源加载完成，核对模组清单和 Mixin 错误，

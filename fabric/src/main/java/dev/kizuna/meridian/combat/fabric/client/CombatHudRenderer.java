@@ -6,15 +6,18 @@ import dev.kizuna.meridian.combat.core.CombatHudFeedback;
 import dev.kizuna.meridian.combat.core.CombatHudLayout;
 import dev.kizuna.meridian.combat.core.CombatIds;
 import dev.kizuna.meridian.combat.core.CombatProfiles;
+import dev.kizuna.meridian.technique.fabric.client.TechniqueStaggerClient;
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.resource.ResourceType;
+import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 
 import static dev.kizuna.meridian.combat.core.CombatHudLayout.ICON_INSET;
 import static dev.kizuna.meridian.combat.core.CombatHudLayout.ICON_SIZE;
@@ -39,6 +42,7 @@ final class CombatHudRenderer {
     private static final int MIN_HEALTH_ROW_HEIGHT = 3;
     private static final int HALF = 2;
     private static final int TIMER_Y = 7;
+    private static final int STAGGER_Y = -10;
     private static final int TEXT_COLOR = 0xffffffff;
     private static final int KEY_COLOR = 0xffaaaaaa;
     private static final int OUTLINE_COLOR = 0xff000000;
@@ -91,10 +95,34 @@ final class CombatHudRenderer {
             context.drawCenteredTextWithShadow(client.textRenderer, fittedLabel,
                     x + SLOT_SIZE / HALF, CombatHudLayout.LABEL_Y, KEY_COLOR);
         }
+        drawStaggers(context, client);
         matrices.pop();
         context.draw();
         RenderSystem.disableBlend();
         feedback.advanceFrame();
+    }
+
+    private static void drawStaggers(DrawContext context, MinecraftClient client) {
+        // 槽位栏上方一行静态文字：自身僵直靠左、准星目标僵直靠右，只读服务端同步的显示副本。
+        long own = TechniqueStaggerClient.remainingMillis(client.player);
+        if (own > 0) {
+            Text text = Text.translatable("hud.meridian_combat.stagger.self", seconds(own));
+            context.drawTextWithShadow(client.textRenderer, text, 0, STAGGER_Y, KEY_COLOR);
+        }
+        if (client.targetedEntity == null) {
+            return;
+        }
+        long target = TechniqueStaggerClient.remainingMillis(client.targetedEntity);
+        if (target > 0) {
+            Text text = Text.translatable("hud.meridian_combat.stagger.target", seconds(target));
+            int x = CombatHudLayout.WIDTH - client.textRenderer.getWidth(text);
+            context.drawTextWithShadow(client.textRenderer, text, x, STAGGER_Y, KEY_COLOR);
+        }
+    }
+
+    private static String seconds(long millis) {
+        // 僵直不足一秒，保留一位小数才看得出长短。
+        return String.format(Locale.ROOT, "%.1f", (double) millis / MILLIS_PER_SECOND);
     }
 
     private static int bottomOffset(MinecraftClient client) {

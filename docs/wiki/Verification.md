@@ -20,6 +20,7 @@ git diff --check
 ```
 
 根 `build` 包含文档链接检查；GameTest 独立启动专用服务端。
+`fabric/build.gradle` 的 `clearNestedJarCache` 在每次 `remapJar` 前删除 `fabric/build/loom-cache/temp/modprocessing`：Loom 只按坐标复用这里的嵌套 JAR，SNAPSHOT 坐标不变时会把旧的嵌套 JAR 打进发布 JAR。
 发行文件为 `fabric/build/libs/kizuna-meridian-combat-ui-addon-fabric-0.1.1-SNAPSHOT.jar`。
 `-sources.jar` 是源码；`fabric/build/devlibs` 中的文件用于开发环境，不用于安装。
 `scripts/prepare_dependencies.py` 保留用于首版历史复现；它固定 89e37ec 功法与 e285947 Framework，
