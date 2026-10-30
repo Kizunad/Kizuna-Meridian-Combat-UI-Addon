@@ -2,14 +2,14 @@
 
 ## 当前图标栏构建
 
-需要 Python 3.12 以上、Java 17 工具链和可运行 Gradle 8.8 的 JDK。
-默认读取相邻本地 `Kizuna-Meridian-Technique-Framework` 与 `Kizuna-Meridian-Mod-Framework`。
+需要 Python 3.12 以上、Java 17 工具链和运行 Gradle 8.14.6 的 JDK 21 及以上（Loom 1.13.6 的要求，产物仍以 Java 17 编译）。
+相邻仓库位置、产物路径与第三方版本由 Framework 的 `scripts/workspace.gradle`、装配清单与版本目录提供，默认读取相邻本地 `Kizuna-Meridian-Technique-Framework` 与 `Kizuna-Meridian-Mod-Framework`。
 图标栏通过宿主公开 `inspect().body()` 查询身体，并使用功法库当前工作区的 `TechniqueState`、
 `TechniqueBinder` 和目录接口；这些接口尚未提交，不能改用首版的 89e37ec 冻结快照。
-功法 Fabric JAR 必须由同一套源码构建，位置为相邻功法仓的 `fabric/build/libs/`。
+功法 fabric 与 server 以源码组合，编译与运行使用功法仓当前源码构建的 named 开发 JAR，随本仓先行构建。
 本仓不修改依赖源码，依赖的构建输出位于各仓忽略目录。
 Linux 默认 Java 17 提示路径是 `/usr/lib/jvm/java-17-openjdk-amd64`；其他系统须安装 Java 17，并按本机位置调整 Gradle 工具链路径。
-可用 Gradle `meridianTechniqueDir`、`meridianFrameworkDir` 属性指定依赖路径；两处 Framework 路径须指向同一构建。
+可用 Gradle `kizuna.dir.technique`、`kizuna.dir.framework` 属性按清单 id 指定依赖路径（`kizunaCodeDir` 整体改指代码根目录）；功法库自身组合的 Framework 同样按清单定位，两处指向同一构建。
 编译、单测与游戏运行任务均指定 Java 17 工具链。在仓库根目录执行：
 
 ```bash
@@ -23,8 +23,8 @@ git diff --check
 `fabric/build.gradle` 的 `clearNestedJarCache` 在每次 `remapJar` 前删除 `fabric/build/loom-cache/temp/modprocessing`：Loom 只按坐标复用这里的嵌套 JAR，SNAPSHOT 坐标不变时会把旧的嵌套 JAR 打进发布 JAR。
 发行文件为 `fabric/build/libs/kizuna-meridian-combat-ui-addon-fabric-0.1.1-SNAPSHOT.jar`。
 `-sources.jar` 是源码；`fabric/build/devlibs` 中的文件用于开发环境，不用于安装。
-`scripts/prepare_dependencies.py` 保留用于首版历史复现；它固定 89e37ec 功法与 e285947 Framework，
-不作为当前图标栏构建的依赖准备入口。历史验证见下文及原交付记录。
+原 `scripts/prepare_dependencies.py` 固定 89e37ec 功法与 e285947 Framework，仅用于首版历史复现，已在构建收拢时删除；
+当前构建按组合构建直接使用功法库与 Framework 源码。历史验证见下文及原交付记录。
 
 ## 自动验证覆盖
 

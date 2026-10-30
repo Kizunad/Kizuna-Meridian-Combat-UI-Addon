@@ -1,7 +1,7 @@
 description = '本地分档、命令语义、输入状态和有界协议；不引用 Minecraft。'
 dependencies {
     api project(':shared')
-    implementation 'com.google.code.gson:gson:2.10.1'
-    testImplementation 'junit:junit:4.13.2'
+    implementation libs.gson
+    testImplementation libs.junit4
 }
 test { useJUnit() }

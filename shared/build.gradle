@@ -1,4 +1,5 @@
 apply plugin: 'com.google.protobuf'
 description = '战斗按键和已学列表的独立 Protobuf 契约。'
-dependencies { api 'com.google.protobuf:protobuf-java:4.36.2' }
-protobuf { protoc { artifact = 'com.google.protobuf:protoc:4.36.2' } }
+dependencies { api libs.protobuf.java }
+// 编译器与运行库固定同版。
+protobuf { protoc { artifact = "com.google.protobuf:protoc:${libs.versions.protobuf.java.get()}" } }

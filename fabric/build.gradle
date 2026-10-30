@@ -2,25 +2,28 @@ plugins { id 'fabric-loom' }
 description = '客户端架势与命令、服务端施放和已学列表同步。'
 repositories { maven { url = 'https://maven.fabricmc.net/' } }
 
-def techniqueDirectory = rootProject.file(providers.gradleProperty('meridianTechniqueDir')
-        .getOrElse('../Kizuna-Meridian-Technique-Framework'))
 dependencies {
-    minecraft 'com.mojang:minecraft:1.20.1'
-    mappings 'net.fabricmc:yarn:1.20.1+build.10:v2'
-    modImplementation 'net.fabricmc:fabric-loader:0.16.10'
-    modImplementation 'net.fabricmc.fabric-api:fabric-api:0.92.3+1.20.1'
+    minecraft libs.minecraft
+    mappings "net.fabricmc:yarn:${libs.versions.yarn.get()}:v2"
+    modImplementation libs.fabric.loader
+    modImplementation libs.fabric.api
     implementation project(':core')
-    implementation 'local.meridian.technique:server'
-    modImplementation files(new File(techniqueDirectory,
-            'fabric/build/libs/kizuna-meridian-technique-framework-fabric-0.1.0-SNAPSHOT.jar'))
+    implementation 'dev.kizuna.meridian.technique:server'
+    // 完整装配按坐标重映射功法 fabric 时，Loom 以真实坐标重新加入 Framework server；本仓直接声明组合的 Framework server，
+    // 冲突时才会解析到同一组合工程，而不是去外部仓库找不存在的发布坐标。
+    implementation 'local.meridian:server'
+    // 组合进来的功法 fabric 直接取 named 开发 JAR：按坐标走 mod 重映射的缓存不随上游改动刷新，也不会先构建上游。
+    implementation('dev.kizuna.meridian.technique:fabric') { targetConfiguration = 'namedElements' }
     include project(':core')
     include project(':shared')
-    include implementation('com.google.protobuf:protobuf-java:4.36.2')
-    testImplementation 'junit:junit:4.13.2'
+    // 版本目录条目是 Provider，implementation 不返回依赖对象，嵌套声明单独写。
+    implementation libs.protobuf.java
+    include libs.protobuf.java
+    testImplementation libs.junit4
 }
 test { useJUnit() }
 tasks.withType(JavaExec).configureEach {
-    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(libs.versions.java.get()) }
 }
 processResources {
     inputs.property 'version', project.version
@@ -77,9 +80,10 @@ loom {
 
 // HUD 截图使用完整安装环境；服务端契约测试仍使用其独立测试宿主。
 if (providers.gradleProperty('combatFullAssembly').isPresent()) {
-    apply from: '../../Kizuna-Meridian-Mod-Framework/scripts/full-assembly.gradle'
+    apply from: new File(kizunaWorkspace.directory('framework'), 'scripts/full-assembly.gradle')
     dependencies {
-        localRuntime files('../../Kizuna-Meridian-Human-Addon/client/build/libs/kizuna-meridian-human-addon-client-0.1.0-SNAPSHOT.jar')
+        // Human 在本仓之上，只在运行时需要，按装配清单读文件。
+        localRuntime files(kizunaWorkspace.artifact('human', 'client', false))
     }
 }
 tasks.register('prepareClientTestWorld', Copy) {
