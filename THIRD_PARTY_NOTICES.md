@@ -10,7 +10,6 @@ PolyForm Noncommercial 1.0.0 仅适用于本项目有权许可的原创部分。
 | Protocol Buffers | 4.36.2 | BSD 3-Clause；使用 protoc 生成消息，发行包内嵌 protobuf-java 并保留原 JAR |
 | Gson | 2.10.1 | Apache License 2.0；由 Minecraft 运行环境提供，发行包不内嵌 |
 | Fabric API / Loader / Loom | 0.92.3+1.20.1 / 0.16.10 / 1.6.12 | Apache License 2.0；运行环境与构建工具，不内嵌 |
-| Yarn | 1.20.1+build.10 | CC0 1.0；仅构建映射 |
 | JUnit / Hamcrest Core | 4.13.2 / 1.3 | Eclipse Public License 1.0 / BSD 3-Clause；仅测试 |
 | Minecraft | 1.20.1 | Mojang 专有许可；由使用者独立取得，不分发游戏文件 |
 
