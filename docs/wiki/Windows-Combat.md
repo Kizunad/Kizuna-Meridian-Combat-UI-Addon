@@ -32,7 +32,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 /gamemode creative
 /difficulty normal
 /meridian opening complete all
-/meridian zhenyuan fill
+/meridian qi fill
 /gamerule meridianTechniquePlayerBreakBlocks true
 /gamerule mobGriefing true
 ```
@@ -89,17 +89,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 弧线贴低、飞行约半秒（平地 6 格约 10 tick），落地稍停 0.3 秒即可按住跳跃键继续连跳。
 每次跃步只耗腿部体力，重疲劳时提示“腿脚乏力”并退回普通跳。状态没有粒子，物品栏和 HUD 显示羽毛图标。
 可直接测试：`/effect give @s meridian_basic_techniques:light_body 20 0`。
-用 `/meridian_debug damage watch on` 观察：正常跃步落地不摔伤，跌落超过预定落点的部分仍受伤。
+用 `/meridian watch damage on` 观察：正常跃步落地不摔伤，跌落超过预定落点的部分仍受伤。
 卫道士也可用 `/effect give @e[type=minecraft:vindicator,limit=1,sort=nearest] meridian_basic_techniques:light_body 20 0`
 给予轻身；生存模式被其锁定后，它会跃到玩家身前一两格再出招。起跳暂借 PA `technique_dash`，专属动画待后续制作。
 蓄力：2 启动力量曲线，先增强、回落，再进入虚脱，最终恢复；不是永久属性提升。
-调息：3 帮助恢复疲劳。费用不足可再次执行 `/meridian zhenyuan fill`，但补元不会消除疲劳。
+调息：3 帮助恢复疲劳。费用不足可再次执行 `/meridian qi fill`，但补元不会消除疲劳。
 
 手持铁斧，对准两格内的木门按 4，等待约 3.2 秒起手后劈开；铁门保持不动。
 创造不扣耐久；切生存后铁斧末击扣 3 耐久。生存测试前先备好安全场地。
 对准三格内生物按 5，在 0.90、1.25、1.70 秒连敲三下；钝击倍率依次为 0.3、0.3、0.9，合计 1.5。
 主手铁斧的每击护甲前剂量为 `9 × 本击倍率 × 当时肌肉系数`；目标离开范围后，后续打击会落空。
-开启 `/meridian_debug damage watch on` 后，命中三次应出现三条日志，黑肢体命中也逐击记录蔓延。
+开启 `/meridian watch damage on` 后，命中三次应出现三条日志，黑肢体命中也逐击记录蔓延。
 轻步、撞门、掩门、连门和万门一斩均由六块腿肌平分做功，不设绝对腿力门槛。
 正常走动后仍可使用；重疲劳或重伤导致做功预算不足时，撞门起手拒绝，轻身跃步退回普通跳。
 疲劳、伤势、护甲等会影响最终伤害；两手可用时部分招式改为双手判定。
@@ -152,21 +152,21 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 可限制到当前选中的目标，结束后关闭：
 
 ```text
-/meridian_debug damage watch on
-/meridian_debug damage watch on @e[type=minecraft:vindicator,sort=nearest,limit=1]
-/meridian_debug damage watch off
+/meridian watch damage on
+/meridian watch damage on @e[type=minecraft:vindicator,sort=nearest,limit=1]
+/meridian watch damage off
 ```
 
-恢复命令只操作已有权威身体，支持玩家和类人生物。省略模式等同 `all`；其余模式为 `health`、`limbs`、
-`stamina`、`zhenyuan`。例如恢复自己、最近卫道士或单独补充真元：
+恢复命令只操作已有权威身体，支持玩家和类人生物。省略模式等同 `all`，同时补满真元；其余模式为 `health`、`stamina`，
+单独补充真元用 `qi fill`（完整写法见 [Framework 指令页](https://github.com/Kizunad/Kizuna-Meridian-Mod-Framework/wiki/Commands#body)）。例如恢复自己、最近卫道士或单独补充真元：
 
 ```text
-/meridian_debug heal @s all
-/meridian_debug heal @e[type=minecraft:vindicator,sort=nearest,limit=1] all
-/meridian_debug heal @s zhenyuan
+/meridian body heal @s all
+/meridian body heal @e[type=minecraft:vindicator,sort=nearest,limit=1] all
+/meridian qi fill
 ```
 
-单部位恢复用 `/meridian_debug heal @s limb <部位> [数值]`，部位 ID 按 Tab 从目标实际身体补全；
+单部位恢复用 `/meridian body heal @s limb <部位> [数值]`，部位 ID 按 Tab 从目标实际身体补全；
 省略数值时补满该部位，提供数值时按指定剂量恢复。
 
 ## 死亡与重生
@@ -193,9 +193,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 调试复活支持默认自己和实体选择器，Tab 可补全；同样扣除 Human 配置的寿元费用：
 
 ```text
-/meridian_debug revive
-/meridian_debug revive @s
-/meridian_debug revive @e[type=minecraft:vindicator,sort=nearest,limit=1]
+/meridian body revive
+/meridian body revive @s
+/meridian body revive @e[type=minecraft:vindicator,sort=nearest,limit=1]
 ```
 
 该命令只接受已有死态身体，活体会拒绝；它只复活身体，不替代玩家的原版重生按钮，
@@ -239,8 +239,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 ## 类人对敌
 
 七种生人都由类人大脑指挥：有威胁时先评估打得过还是该撤，再决定出招、躲、硬抗或拉开；没有威胁时照原版日常。
-以下在普通难度、生存模式试玩，命令需要权限 2。观察施放可用 `/meridian_debug technique status <目标>`，
-观察跃步可用 `/meridian_debug leap watch on <目标>`。
+以下在普通难度、生存模式试玩，命令需要权限 2。观察施放可用 `/meridian technique status <目标>`，
+观察跃步可用 `/meridian watch leap on <目标>`。
 
 **村民撤退。** 生成一个游炁村民，空手打它一拳：
 
@@ -256,7 +256,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 ```text
 /meridian humanoid spawn villager true_qi ~ ~ ~3
 /item replace entity @e[type=minecraft:villager,sort=nearest,limit=1] weapon.mainhand with minecraft:iron_axe
-/meridian_debug technique learn @e[type=minecraft:villager,sort=nearest,limit=1] meridian_door_breaker:knock
+/meridian technique learn @e[type=minecraft:villager,sort=nearest,limit=1] meridian_door_breaker:knock
 ```
 
 自认打得过时它会对你出叩门；血量、最弱部位或双臂力量掉到门槛以下就转为撤退，恢复后再回来。
@@ -264,7 +264,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 **调息。** 无威胁、四肢疲劳时它会自己调息：
 
 ```text
-/meridian_debug fatigue set @e[type=minecraft:villager,sort=nearest,limit=1] all 0.5
+/meridian debug fatigue set @e[type=minecraft:villager,sort=nearest,limit=1] all 0.5
 ```
 
 **卫道士突击。** 生成一只真炁卫道士，站在约 6 格外不动：
@@ -280,7 +280,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 ```text
 /meridian humanoid spawn vindicator true_qi ~ ~ ~4
 /meridian humanoid spawn vindicator true_qi ~ ~ ~10
-/meridian_debug aggro @e[type=minecraft:vindicator,sort=nearest,limit=1] @e[type=minecraft:vindicator,sort=furthest,limit=1] mutual
+/meridian humanoid aggro @e[type=minecraft:vindicator,sort=nearest,limit=1] @e[type=minecraft:vindicator,sort=furthest,limit=1] mutual
 ```
 
 能看到抢在对方起手结束前打断、来袭时侧闪或硬抗、开打前蓄力，以及虚脱后的拉扯。
