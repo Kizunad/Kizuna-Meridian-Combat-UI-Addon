@@ -1,9 +1,14 @@
 package dev.kizuna.meridian.combat.fabric;
 
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import dev.kizuna.meridian.combat.core.CombatProtocol;
 import dev.kizuna.meridian.combat.core.PressLimiter;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotCommand;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotOperation;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
+import dev.kizuna.meridian.fabric.MeridianCommands;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
@@ -18,6 +23,7 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.S2CPlayChannelEvents;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -27,11 +33,12 @@ import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** 服务端只校验逐次施放；不接收和保存客户端槽位。 */
+/** 服务端校验逐次施放，并把 /meridian combat slot 的操作转发给执行者本人；不接收和保存客户端槽位。 */
 public final class CombatFabric implements ModInitializer {
     private static final Logger LOGGER = LoggerFactory.getLogger("meridian_combat");
     private static final int REFRESH_TICKS = 5;
@@ -66,6 +73,9 @@ public final class CombatFabric implements ModInitializer {
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
             clearSessions();
         });
+        // 客户端不能注册 meridian 根，否则会遮住服务端整棵 /meridian；槽位指令改由服务端节点解析后下发。
+        MeridianCommands.register(MeridianCommands.Branch.COMBAT, "slot", MeridianCommands.PLAYER,
+                (node, context) -> CombatCommandTree.attach(node, new SlotCommands()));
     }
 
     private void disconnect(UUID uuid) {
@@ -180,6 +190,59 @@ public final class CombatFabric implements ModInitializer {
         if (reportedFailures.add(uuid)) {
             LOGGER.warn("无法推送玩家已学功法：{}", uuid, failure);
             player.displayClientMessage(Component.literal("已学功法暂时无法同步"), true /* overlay */);
+        }
+    }
+
+    private final class SlotCommands implements CombatCommandTree.Actions<CommandSourceStack> {
+        @Override
+        public int set(CommandSourceStack source, int slot, String technique) throws CommandSyntaxException {
+            // 功法格式与已学校验留在客户端槽位语义层，失败原因仍走动作栏。
+            return send(source, SlotCommand.newBuilder()
+                    .setOperation(SlotOperation.SLOT_OPERATION_SET)
+                    .setSlot(slot)
+                    .setTechniqueId(technique));
+        }
+
+        @Override
+        public int clear(CommandSourceStack source, int slot) throws CommandSyntaxException {
+            // 槽号已由 Brigadier 限定在 1–10，清空只影响客户端当前分档。
+            return send(source, SlotCommand.newBuilder()
+                    .setOperation(SlotOperation.SLOT_OPERATION_CLEAR)
+                    .setSlot(slot));
+        }
+
+        @Override
+        public int list(CommandSourceStack source) throws CommandSyntaxException {
+            // 十槽内容只在客户端，由客户端打印到聊天区。
+            return send(source, SlotCommand.newBuilder().setOperation(SlotOperation.SLOT_OPERATION_LIST));
+        }
+
+        @Override
+        public List<String> suggestions(CommandSourceStack source, String prefix) {
+            // 补全取最近一次推送给该玩家的已学列表，与客户端校验用的是同一份。
+            ServerPlayer player = source.getPlayer();
+            if (player == null) {
+                return List.of();
+            }
+            KnownTechniques known = sentKnown.getOrDefault(player.getUUID(), KnownTechniques.getDefaultInstance());
+            return known.getTechniquesList().stream()
+                    .map(KnownTechnique::getId)
+                    .filter(id -> id.startsWith(prefix))
+                    .sorted()
+                    .toList();
+        }
+
+        private int send(CommandSourceStack source, SlotCommand.Builder command) throws CommandSyntaxException {
+            // 槽位只存在玩家客户端：控制台执行直接报错；客户端没声明接收通道时明确失败，不静默吞掉。
+            ServerPlayer player = source.getPlayerOrException();
+            if (!ServerPlayNetworking.canSend(player, CombatChannels.SLOT)) {
+                source.sendFailure(Component.literal("客户端未安装战斗界面，无法修改本地战斗槽"));
+                return 0;
+            }
+            var payload = PacketByteBufs.create();
+            payload.writeBytes(command.build().toByteArray());
+            ServerPlayNetworking.send(player, CombatChannels.SLOT, payload);
+            return 1;
         }
     }
 }

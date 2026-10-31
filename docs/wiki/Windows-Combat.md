@@ -50,19 +50,19 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 
 ## 填槽、架势与视角
 
-学会后输入客户端命令：
+学会后输入命令（权限 0；槽位只存本机）：
 
 ```text
-/meridian_combat slot set 1 meridian_basic_techniques:light_step
-/meridian_combat slot set 2 meridian_basic_techniques:charge
-/meridian_combat slot set 3 meridian_basic_techniques:breath
-/meridian_combat slot set 4 meridian_door_breaker:cleave
-/meridian_combat slot set 5 meridian_door_breaker:knock
-/meridian_combat slot set 6 meridian_door_breaker:ram
-/meridian_combat slot list
+/meridian combat slot set 1 meridian_basic_techniques:light_step
+/meridian combat slot set 2 meridian_basic_techniques:charge
+/meridian combat slot set 3 meridian_basic_techniques:breath
+/meridian combat slot set 4 meridian_door_breaker:cleave
+/meridian combat slot set 5 meridian_door_breaker:knock
+/meridian combat slot set 6 meridian_door_breaker:ram
+/meridian combat slot list
 ```
 
-清槽用 `/meridian_combat slot clear 1`。旧 trial 槽会显示失效，应清空或改成已学的正式 ID。
+清槽用 `/meridian combat slot clear 1`。旧 trial 槽会显示失效，应清空或改成已学的正式 ID。
 `set`、`clear` 的槽号补全 1–10，功法 ID 补全当前服务器已学列表。
 调试授予可用 `/meridian_technique learn @s <id>`；ID 补全当前目录的书、卷、式，整书一次原子学会。
 
@@ -208,9 +208,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 
 ```text
 /meridian_technique learn @s meridian_door_breaker:upper
-/meridian_combat slot set 4 meridian_door_breaker:cleave
-/meridian_combat slot set 5 meridian_door_breaker:knock
-/meridian_combat slot set 6 meridian_door_breaker:ram
+/meridian combat slot set 4 meridian_door_breaker:cleave
+/meridian combat slot set 5 meridian_door_breaker:knock
+/meridian combat slot set 6 meridian_door_breaker:ram
 /give @s minecraft:iron_axe
 ```
 

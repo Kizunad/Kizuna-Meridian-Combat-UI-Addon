@@ -49,6 +49,28 @@ JOIN 后排队发送完整快照；客户端晚注册接收通道时再排队补
 客户端网络线程只复制有界字节，客户端线程解码并完整替换；回调核对当前 handler，避免旧连接覆盖新服务器缓存。
 断线、加入新连接均清空已学缓存；损坏列表解码后清空缓存。网络入口超长包直接丢弃。
 
+## 槽位指令
+
+`/meridian combat slot` 挂在 Framework 的 `/meridian` 注册点（`MeridianCommands.register(Branch.COMBAT, "slot", PLAYER, …)`）。
+客户端不注册 `meridian` 根：Fabric 客户端分发器解析失败时只忽略「未知命令」与「解析异常」，同名根会让 `/meridian body status`
+等服务端子命令在客户端报错而不转发。所以由服务端解析，再经 `meridian_combat:slot` 把操作发回执行者本人。
+
+`meridian_combat:slot` 是 S2C 原始 Protobuf：
+
+```proto
+enum SlotOperation {
+  SLOT_OPERATION_UNSPECIFIED = 0;
+  SLOT_OPERATION_SET = 1;
+  SLOT_OPERATION_CLEAR = 2;
+  SLOT_OPERATION_LIST = 3;
+}
+message SlotCommand { SlotOperation operation = 1; int32 slot = 2; string technique_id = 3; }
+```
+
+服务端只接受玩家执行；客户端没有声明该通道时指令失败并提示，不静默丢弃。功法补全取最近一次推送给该玩家的已学列表。
+客户端拒绝空包与超过 1024 字节的包，只接受三种操作，设置与清空的槽号须为 1–10；功法格式与已学校验仍由客户端槽位语义层完成，
+结果与原客户端命令相同：设置、清空与失败原因走动作栏，列表进聊天区。网络线程只复制有界字节，客户端线程解码并核对当前 handler。
+
 ## 本地文件
 
 格式版本为 2，包含 `format_version`、`last_profile`、`profiles`、`view`。

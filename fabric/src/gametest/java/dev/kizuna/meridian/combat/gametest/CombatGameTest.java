@@ -2,15 +2,24 @@ package dev.kizuna.meridian.combat.gametest;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.UnknownFieldSet;
+import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.suggestion.Suggestion;
+import dev.kizuna.meridian.combat.core.CombatIds;
 import dev.kizuna.meridian.combat.core.CombatProtocol;
 import dev.kizuna.meridian.combat.core.PressLimiter;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotOperation;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.server.TechniqueState;
 import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.gametest.framework.GameTest;
+import net.minecraft.gametest.framework.GameTestAssertException;
 import net.minecraft.gametest.framework.GameTestHelper;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /** 专用服务端验证正式通道、公开功法服务与推送事件之间的接线。 */
 public final class CombatGameTest implements FabricGameTest {
@@ -25,6 +34,7 @@ public final class CombatGameTest implements FabricGameTest {
     private static final double EPSILON = 0.000001;
     private static final int UNKNOWN_FIELD = 31;
     private static final long PAUSED_OBSERVATION_TICKS = 21;
+    private static final String SLOT = "meridian combat slot ";
 
     @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
     public void pausedHostClearsHudStopsPollingAndResumesAfterReconnect(GameTestHelper context) {
@@ -184,6 +194,85 @@ public final class CombatGameTest implements FabricGameTest {
                 context.succeed();
             }
         });
+    }
+
+    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    public void slotCommandForwardsToExecutorOnly(GameTestHelper context) {
+        // 已学列表推送之后再查补全：功法候选取服务端最近一次推送给该玩家的列表。
+        var fixture = new CombatTestPlayer(context);
+        var bystander = new CombatTestPlayer(context);
+        fixture.registerKnown();
+        fixture.registerSlot();
+        fixture.learn();
+        later(context, fixture, () -> {
+            try (fixture; bystander) {
+                verifySlotCommands(context, fixture, bystander);
+            }
+            context.succeed();
+        });
+    }
+
+    private static void verifySlotCommands(GameTestHelper context, CombatTestPlayer fixture,
+                                           CombatTestPlayer bystander) {
+        // 权限 0 玩家能补全并执行 combat slot；操作只下发给执行者本人，控制台和未装本模组的客户端被拒绝。
+        var server = context.getLevel().getServer();
+        var dispatcher = server.getCommands().getDispatcher();
+        var source = fixture.player.createCommandSourceStack().withPermission(0);
+        context.assertTrue(dispatcher.getRoot().getChild("meridian_combat") == null, "旧根 /meridian_combat 应已删除");
+        context.assertTrue(suggestions(dispatcher, source, "meridian combat ").contains("slot"),
+                "权限 0 玩家看不到 combat slot");
+        context.assertTrue(suggestions(dispatcher, source, SLOT).equals(Set.of("set", "clear", "list")),
+                "slot 下的动作补全不全");
+        context.assertTrue(suggestions(dispatcher, source, SLOT + "set ").size() == CombatIds.SLOT_COUNT,
+                "槽号补全不是 1–10");
+        context.assertTrue(suggestions(dispatcher, source, SLOT + "set 1 ").equals(Set.of(CombatTestContent.TECHNIQUE)),
+                "功法补全没有取已推送的已学列表");
+        run(dispatcher, source, SLOT + "set 10 " + CombatTestContent.TECHNIQUE);
+        run(dispatcher, source, SLOT + "clear 3");
+        run(dispatcher, source, SLOT + "list");
+        var sent = fixture.connection.slots;
+        context.assertTrue(sent.size() == 3, "三条槽位指令应各下发一次，实际 " + sent.size());
+        context.assertTrue(sent.get(0).getOperation() == SlotOperation.SLOT_OPERATION_SET
+                && sent.get(0).getSlot() == CombatIds.SLOT_COUNT
+                && sent.get(0).getTechniqueId().equals(CombatTestContent.TECHNIQUE), "set 下发内容错误");
+        context.assertTrue(sent.get(1).getOperation() == SlotOperation.SLOT_OPERATION_CLEAR
+                && sent.get(1).getSlot() == 3, "clear 下发内容错误");
+        context.assertTrue(sent.get(2).getOperation() == SlotOperation.SLOT_OPERATION_LIST, "list 下发内容错误");
+        context.assertTrue(rejects(dispatcher, server.createCommandSourceStack(), SLOT + "list"),
+                "控制台没有本地槽位，执行应失败");
+        var bystanderSource = bystander.player.createCommandSourceStack().withPermission(0);
+        context.assertTrue(run(dispatcher, bystanderSource, SLOT + "list") == 0, "未声明槽位通道的客户端应失败");
+        context.assertTrue(bystander.connection.slots.isEmpty(), "槽位操作发给了执行者以外的玩家");
+    }
+
+    private static int run(CommandDispatcher<CommandSourceStack> dispatcher, CommandSourceStack source,
+                           String command) {
+        // 合法指令不应在解析阶段失败；失败时带上原文，便于定位。
+        try {
+            return dispatcher.execute(command, source);
+        } catch (CommandSyntaxException failure) {
+            throw new GameTestAssertException(command + " 解析失败：" + failure.getMessage());
+        }
+    }
+
+    private static boolean rejects(CommandDispatcher<CommandSourceStack> dispatcher, CommandSourceStack source,
+                                   String command) {
+        // 期望在解析或执行阶段抛出语法异常（如控制台没有玩家）。
+        try {
+            dispatcher.execute(command, source);
+        } catch (CommandSyntaxException expected) {
+            return true;
+        }
+        return false;
+    }
+
+    private static Set<String> suggestions(CommandDispatcher<CommandSourceStack> dispatcher,
+                                           CommandSourceStack source, String input) {
+        // 与客户端 Tab 一致：按输入解析后取服务端补全。
+        var parse = dispatcher.parse(input, source);
+        return dispatcher.getCompletionSuggestions(parse).join().getList().stream()
+                .map(Suggestion::getText)
+                .collect(Collectors.toSet());
     }
 
     private static dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique latest(

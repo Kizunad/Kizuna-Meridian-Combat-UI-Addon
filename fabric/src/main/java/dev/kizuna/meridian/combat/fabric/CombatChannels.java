@@ -6,6 +6,7 @@ import net.minecraft.resources.ResourceLocation;
 public final class CombatChannels {
     public static final ResourceLocation PRESS = new ResourceLocation("meridian_combat", "press");
     public static final ResourceLocation KNOWN = new ResourceLocation("meridian_combat", "known");
+    public static final ResourceLocation SLOT = new ResourceLocation("meridian_combat", "slot");
 
     private CombatChannels() {
         // 通道标识不随连接变化。

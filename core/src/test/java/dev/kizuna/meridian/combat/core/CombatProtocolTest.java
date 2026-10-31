@@ -1,5 +1,7 @@
 package dev.kizuna.meridian.combat.core;
 
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotCommand;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotOperation;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
 import org.junit.Test;
 
@@ -31,6 +33,25 @@ public final class CombatProtocolTest {
     }
 
     @Test
+    public void slotCommandRejectsUnknownOperationAndOutOfRangeSlot() {
+        // 槽位指令只接受三种操作；设置与清空的槽号必须在 1–10，列表不看槽号。
+        var set = slot(SlotOperation.SLOT_OPERATION_SET, CombatIds.SLOT_COUNT, "sample:step");
+        assertEquals("sample:step", CombatProtocol.decodeSlot(set).getTechniqueId());
+        assertEquals(SlotOperation.SLOT_OPERATION_LIST,
+                CombatProtocol.decodeSlot(slot(SlotOperation.SLOT_OPERATION_LIST, 0, "")).getOperation());
+        assertThrows(IllegalArgumentException.class, () -> CombatProtocol.decodeSlot(new byte[0]));
+        assertThrows(IllegalArgumentException.class,
+                () -> CombatProtocol.decodeSlot(new byte[CombatProtocol.MAX_SLOT_BYTES + 1]));
+        assertThrows(IllegalArgumentException.class,
+                () -> CombatProtocol.decodeSlot(slot(SlotOperation.SLOT_OPERATION_UNSPECIFIED, 1, "")));
+        assertThrows(IllegalArgumentException.class,
+                () -> CombatProtocol.decodeSlot(slot(SlotOperation.SLOT_OPERATION_CLEAR, 0, "")));
+        assertThrows(IllegalArgumentException.class,
+                () -> CombatProtocol.decodeSlot(slot(SlotOperation.SLOT_OPERATION_SET, CombatIds.SLOT_COUNT + 1,
+                        "sample:step")));
+    }
+
+    @Test
     public void slidingWindowRejectsBurstAndReleasesAtBoundary() {
         // 任意一秒最多二十次，不能在固定秒边界瞬时接受四十次。
         var limiter = new PressLimiter();
@@ -48,6 +69,16 @@ public final class CombatProtocolTest {
         assertTrue(limiter.accept(first, start + PressLimiter.WINDOW_NANOS));
         limiter.clear();
         assertTrue(limiter.accept(second, start));
+    }
+
+    private static byte[] slot(SlotOperation operation, int number, String id) {
+        // 列表也编码一个零槽号，验证解码不对它做槽号校验。
+        return SlotCommand.newBuilder()
+                .setOperation(operation)
+                .setSlot(number)
+                .setTechniqueId(id)
+                .build()
+                .toByteArray();
     }
 
     private static byte[] press(String id) {

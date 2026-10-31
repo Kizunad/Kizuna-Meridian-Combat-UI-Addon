@@ -31,13 +31,13 @@ git diff --check
 |---|---:|---|
 | CombatProfilesTest | 6 | 文件往返、重复槽、损坏/未来版本保护、读上限、跨档复制、64 档 LRU、越界与失效槽 |
 | CombatInputTest | 5 | 无槽进入、十个空槽提示与保持架势、界面暂停、主动与自动退出、视角方向及零输入 |
-| CombatProtocolTest | 2 | 非法/超长/非有限数解码、滑动窗口边界、玩家隔离和清理 |
-| CombatCommandTreeTest | 2 | 正式 Brigadier 命令解析、槽边界、拒绝未学、已学补全实时更新 |
+| CombatProtocolTest | 3 | 非法/超长/非有限数解码、槽位指令操作与槽号校验、滑动窗口边界、玩家隔离和清理 |
+| CombatCommandTreeTest | 3 | 正式 Brigadier 解析 `meridian combat slot`、槽边界与槽号补全、拒绝未学、已学补全实时更新 |
 | CombatViewTest | 7 | 默认与记忆、全部原视角恢复、独立镜头、相对移动、斜向、最短弧限速转身、人物施放方向 |
 | CombatCameraTest | 5 | 右上后几何、无墙、后墙、肩侧墙/低顶、眼位遮挡归零 |
 | CombatViewConfigTest | 3 | 模式与参数往返、格式 1 保槽迁移、无效/非有限/未来配置原件保护 |
 | CombatHudTest | 4 | 十槽与重复绑定、缺图文字、冷却插值与钳位、断线清理、资源路径和时间边界 |
-| CombatGameTest | 5 | 正式通道有界解码与施放、精确旧版权限、中文拒绝、入口限流、通道注册与 KNOWN_CHANGED 实际 S2C 推送 |
+| CombatGameTest | 7 | 正式通道有界解码与施放、精确旧版权限、中文拒绝、入口限流、通道注册与 KNOWN_CHANGED 实际 S2C 推送、暂停与重连、`combat slot` 节点补全与只发执行者 |
 | CombatViewGameTest | 2 | 真实方块后墙/侧墙整段收缩、人物射线与正式施放方向不随纯镜头角改变 |
 
 GameTest 玩家进入真实玩家管理器，调用正式 `ServerGamePacketListenerImpl.handleCustomPayload`，仅以记录连接替换真实套接字。
@@ -257,3 +257,24 @@ GameRenderer 仍从人物 pick/getViewVector 取目标，LivingEntity 的插值 
 实际命令、日志与图形验收边界见 [图标栏交付](Delivery-HUD.md)。
 历史 30 JUnit / 6 GameTest 结果不包含图标栏。本次在更新后的功法库公开 API 上验证 34 JUnit / 7 GameTest。
 图标实际绘制、资源包补图/重载、GUI 缩放、F1 与其他 HUD 重叠仍须真实客户端验证；没有截图或 OCR。
+
+## 槽位指令改挂 /meridian（S2）
+
+旧客户端根 `/meridian_combat` 删除，改为服务端节点 `/meridian combat slot` 加 `meridian_combat:slot` 下发，原因与消息形状见
+[网络与配置契约](Contracts.md#槽位指令)。命令树 `CombatCommandTree` 移到 `fabric` 包，`attach` 只填 `slot` 之下的子树。
+
+- `CombatProtocolTest.slotCommandRejectsUnknownOperationAndOutOfRangeSlot`：三种操作通过；空包、超长、未指定操作、清空 0 号与设置 11 号被拒。
+- `CombatCommandTreeTest` 三项改走 `meridian combat slot …` 路径，断言不变。
+- `combatgametest.slotcommandforwardstoexecutoronly`：旧根已删；权限 0 玩家补全到 `slot`、`set/clear/list`、十个槽号与已推送的已学功法；
+  `set 10`、`clear 3`、`list` 各发一条 `SlotCommand` 给执行者，旁观玩家收不到；控制台执行报错；未声明通道的玩家执行返回 0。
+- clientTest（`-PcombatFullAssembly`，Xvfb）在截图前先学 `meridian_door_breaker:knock`，经正式聊天指令入口发
+  `/meridian combat slot clear 1` 与 `set 1 …`，读回 `config/kizuna-meridian-combat.json` 当前分档第一槽；
+  再确认 Fabric 客户端分发器没有 `meridian` 根，并发送 `/meridian body status`，回复不能是 `command.*` 错误。
+  报告多一行 `commands=true`。
+
+```bash
+./gradlew test build :fabric:runGametest
+xvfb-run -a -s "-screen 0 1280x960x24" ./gradlew -PcombatFullAssembly :fabric:runClientTest
+```
+
+结果：JUnit 41/41（core 38、fabric 3）；GameTest 9/9，49 个模组；clientTest `success=true commands=true captures=10`，87 个模组。

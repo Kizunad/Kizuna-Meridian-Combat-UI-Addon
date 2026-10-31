@@ -5,16 +5,19 @@
 
 ## 设置槽位
 
-先由服务端的公开学会命令或宿主逻辑授予功法，再输入客户端命令：
+先由服务端的公开学会命令或宿主逻辑授予功法，再用 `/meridian combat slot` 设置（权限 0，写法见
+[Framework 指令页](https://github.com/Kizunad/Kizuna-Meridian-Mod-Framework/wiki/Commands#combat)）：
 
 ```text
-/meridian_combat slot set 1 meridian_basic_techniques:light_step
-/meridian_combat slot set 10 meridian_basic_techniques:breath
-/meridian_combat slot clear 1
-/meridian_combat slot list
+/meridian combat slot set 1 meridian_basic_techniques:light_step
+/meridian combat slot set 10 meridian_basic_techniques:breath
+/meridian combat slot clear 1
+/meridian combat slot list
 ```
 
-示例 ID 需要实际内容附属提供。`set` 只接收当前服务器已学列表中的完整 ID，补全同样来自该列表。
+指令由服务端解析后只发给执行者本人的客户端，槽位仍只写客户端本地文件，服务端不保存；客户端没装本附属时指令失败。
+
+示例 ID 需要实际内容附属提供。`set` 只接收当前服务器已学列表中的完整 ID，补全取服务端最近一次推送给本人的同一列表。
 `set` 和 `clear` 的槽号均补全 1–10，并按已输入的数字前缀过滤；子命令使用固定 literal。
 同一功法可以占多个槽，仍共用服务端冷却。`list` 在聊天区列出全部十槽，便于完整阅读；操作状态和施放拒绝使用动作栏。
 旧槽对应内容被移除或不再已学时保留配置并标失效，按键只提示，不发包。

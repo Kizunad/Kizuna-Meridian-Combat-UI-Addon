@@ -1,25 +1,25 @@
-package dev.kizuna.meridian.combat.fabric.client;
+package dev.kizuna.meridian.combat.fabric;
 
-import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import dev.kizuna.meridian.combat.core.CombatIds;
 
 import java.util.List;
 
-/** 同一棵命令树同时供 Fabric 注册和真实 Brigadier 解析测试使用。 */
+/** /meridian combat slot 的子树；同一棵树同时供注册点登记和真实 Brigadier 解析测试使用。 */
 public final class CombatCommandTree {
     private CombatCommandTree() {
         // 命令解析不持有 Minecraft 单例。
     }
 
-    public static <S> void register(CommandDispatcher<S> dispatcher, Actions<S> actions) {
+    public static <S> void attach(LiteralArgumentBuilder<S> slot, Actions<S> actions) {
         // 最后一个参数使用完整余串接收命名空间冒号，语义层再校验为单个功法 ID。
         var id = RequiredArgumentBuilder.<S, String>argument("technique", StringArgumentType.greedyString())
                 .suggests((context, builder) -> {
-                    actions.suggestions(builder.getRemaining()).forEach(builder::suggest);
+                    actions.suggestions(context.getSource(), builder.getRemaining()).forEach(builder::suggest);
                     return builder.buildFuture();
                 })
                 .executes(context -> actions.set(context.getSource(),
@@ -29,12 +29,10 @@ public final class CombatCommandTree {
         var clearSlot = CombatCommandTree.<S>slotArgument()
                 .executes(context -> actions.clear(context.getSource(),
                         IntegerArgumentType.getInteger(context, "slot")));
-        var slots = LiteralArgumentBuilder.<S>literal("slot")
-                .then(LiteralArgumentBuilder.<S>literal("set").then(setSlot))
+        slot.then(LiteralArgumentBuilder.<S>literal("set").then(setSlot))
                 .then(LiteralArgumentBuilder.<S>literal("clear").then(clearSlot))
                 .then(LiteralArgumentBuilder.<S>literal("list")
                         .executes(context -> actions.list(context.getSource())));
-        dispatcher.register(LiteralArgumentBuilder.<S>literal("meridian_combat").then(slots));
     }
 
     private static <S> RequiredArgumentBuilder<S, Integer> slotArgument() {
@@ -53,9 +51,9 @@ public final class CombatCommandTree {
     }
 
     public interface Actions<S> {
-        int set(S source, int slot, String technique);
-        int clear(S source, int slot);
-        int list(S source);
-        List<String> suggestions(String prefix);
+        int set(S source, int slot, String technique) throws CommandSyntaxException;
+        int clear(S source, int slot) throws CommandSyntaxException;
+        int list(S source) throws CommandSyntaxException;
+        List<String> suggestions(S source, String prefix);
     }
 }

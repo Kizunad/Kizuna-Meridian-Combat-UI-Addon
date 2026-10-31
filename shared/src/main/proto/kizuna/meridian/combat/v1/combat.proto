@@ -19,3 +19,15 @@ message KnownTechnique {
   int64 cooldown_total_millis = 5;
   string unavailable_reason = 6;
 }
+// 服务端解析 /meridian combat slot 后只发给执行者本人；槽位仍只写客户端本地文件，服务端不保存。
+enum SlotOperation {
+  SLOT_OPERATION_UNSPECIFIED = 0;
+  SLOT_OPERATION_SET = 1;
+  SLOT_OPERATION_CLEAR = 2;
+  SLOT_OPERATION_LIST = 3;
+}
+message SlotCommand {
+  SlotOperation operation = 1;
+  int32 slot = 2;
+  string technique_id = 3;
+}

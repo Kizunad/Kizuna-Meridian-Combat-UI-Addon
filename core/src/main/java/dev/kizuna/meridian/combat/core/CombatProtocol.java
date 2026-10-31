@@ -2,6 +2,7 @@ package dev.kizuna.meridian.combat.core;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotCommand;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
 
 import java.util.HashSet;
@@ -11,11 +12,12 @@ public final class CombatProtocol {
     public static final int MAX_PRESS_BYTES = 1024;
     public static final int MAX_KNOWN_BYTES = 1_048_576;
     public static final int MAX_KNOWN_COUNT = 4096;
+    public static final int MAX_SLOT_BYTES = 1024;
     private static final int MAX_NAME_LENGTH = 1024;
     public static final long MAX_COOLDOWN_MILLIS = 86_400_000;
 
     private CombatProtocol() {
-        // 两条通道复用一致的边界规则。
+        // 三条通道复用一致的边界规则。
     }
 
     public static TechniquePress decodePress(byte[] payload) {
@@ -61,6 +63,29 @@ public final class CombatProtocol {
             return entries;
         } catch (InvalidProtocolBufferException failure) {
             throw new IllegalArgumentException("已学列表格式无效", failure);
+        }
+    }
+
+    public static SlotCommand decodeSlot(byte[] payload) {
+        // 指令已由服务端 Brigadier 解析；这里只拒绝超长包、未知操作和越界槽号，功法标识留给槽位语义层校验并提示。
+        if (payload.length == 0 || payload.length > MAX_SLOT_BYTES) {
+            throw new IllegalArgumentException("槽位指令大小无效");
+        }
+        try {
+            SlotCommand command = SlotCommand.parseFrom(payload);
+            switch (command.getOperation()) {
+                case SLOT_OPERATION_SET, SLOT_OPERATION_CLEAR -> {
+                    CombatIds.slotIndex(command.getSlot());
+                }
+                case SLOT_OPERATION_LIST -> {
+                }
+                default -> {
+                    throw new IllegalArgumentException("未知的槽位操作");
+                }
+            }
+            return command;
+        } catch (InvalidProtocolBufferException failure) {
+            throw new IllegalArgumentException("槽位指令格式无效", failure);
         }
     }
 }

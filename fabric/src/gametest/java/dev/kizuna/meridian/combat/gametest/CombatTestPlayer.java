@@ -4,6 +4,7 @@ import com.mojang.authlib.GameProfile;
 import dev.kizuna.meridian.combat.core.CombatProtocol;
 import dev.kizuna.meridian.combat.fabric.CombatChannels;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotCommand;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
@@ -54,6 +55,12 @@ final class CombatTestPlayer implements AutoCloseable {
                 CombatChannels.KNOWN.toString().getBytes(StandardCharsets.UTF_8));
     }
 
+    void registerSlot() {
+        // 模拟装了本模组的客户端声明槽位指令通道；不声明的玩家视同客户端未装本模组。
+        send(new ResourceLocation("minecraft", "register"),
+                CombatChannels.SLOT.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
     void press(byte[] bytes) {
         // 不直接调用业务处理器，验证全局接收器确实注册且执行。
         send(CombatChannels.PRESS, bytes);
@@ -88,6 +95,7 @@ final class CombatTestPlayer implements AutoCloseable {
 
     static final class RecordingConnection extends Connection {
         final List<KnownTechniques> known = new ArrayList<>();
+        final List<SlotCommand> slots = new ArrayList<>();
         final List<String> overlays = new ArrayList<>();
 
         RecordingConnection() {
@@ -121,16 +129,25 @@ final class CombatTestPlayer implements AutoCloseable {
 
         private void record(Packet<?> packet) {
             // 在发送时复制数据，后续不依赖 FriendlyByteBuf 的引用计数生命周期。
-            if (packet instanceof ClientboundCustomPayloadPacket payload
-                    && payload.getIdentifier().equals(CombatChannels.KNOWN)) {
-                var buffer = payload.getData();
-                byte[] bytes = new byte[buffer.readableBytes()];
-                buffer.getBytes(buffer.readerIndex(), bytes);
-                known.add(CombatProtocol.decodeKnown(bytes));
+            if (packet instanceof ClientboundCustomPayloadPacket payload) {
+                if (payload.getIdentifier().equals(CombatChannels.KNOWN)) {
+                    known.add(CombatProtocol.decodeKnown(bytes(payload)));
+                }
+                if (payload.getIdentifier().equals(CombatChannels.SLOT)) {
+                    slots.add(CombatProtocol.decodeSlot(bytes(payload)));
+                }
             }
             if (packet instanceof ClientboundSystemChatPacket message && message.overlay()) {
                 overlays.add(message.content().getString());
             }
+        }
+
+        private static byte[] bytes(ClientboundCustomPayloadPacket payload) {
+            // 只读拷贝，不移动读指针。
+            var buffer = payload.getData();
+            byte[] bytes = new byte[buffer.readableBytes()];
+            buffer.getBytes(buffer.readerIndex(), bytes);
+            return bytes;
         }
     }
 }

@@ -11,10 +11,9 @@ import dev.kizuna.meridian.combat.core.CombatProfiles;
 import dev.kizuna.meridian.combat.core.CombatProtocol;
 import dev.kizuna.meridian.combat.core.CombatSlots;
 import dev.kizuna.meridian.combat.fabric.CombatChannels;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotCommand;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
-import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
@@ -65,14 +64,13 @@ public final class CombatClient implements ClientModInitializer {
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> join(client));
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> disconnect());
         registerKnown();
+        registerSlotCommands();
         renderer = new CombatHudRenderer(hud, profiles, slotTenKey);
         HudRenderCallback.EVENT.register((context, tickDelta) -> {
             if (input.state() == CombatInput.State.ACTIVE) {
                 renderer.render(context);
             }
         });
-        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) ->
-                CombatCommandTree.register(dispatcher, new Commands()));
     }
 
     private void load() {
@@ -144,6 +142,55 @@ public final class CombatClient implements ClientModInitializer {
             slots.updateKnown(Map.of());
             hud.clear();
             LOGGER.warn("无法读取服务器已学功法", failure);
+        }
+    }
+
+    private void registerSlotCommands() {
+        // 服务端 /meridian combat slot 只转发操作；网络线程复制有界字节，客户端线程解码并改本地槽位。
+        ClientPlayNetworking.registerGlobalReceiver(CombatChannels.SLOT,
+                (client, handler, buffer, sender) -> {
+                    int size = buffer.readableBytes();
+                    if (size > CombatProtocol.MAX_SLOT_BYTES) {
+                        return;
+                    }
+                    byte[] payload = new byte[size];
+                    buffer.readBytes(payload);
+                    client.execute(() -> {
+                        if (client.getConnection() == handler) {
+                            applySlotCommand(client, payload);
+                        }
+                    });
+                });
+    }
+
+    private void applySlotCommand(Minecraft client, byte[] payload) {
+        // 设置与按键选择使用同一套已学列表；成功与失败提示走动作栏，十槽列表进聊天以便完整阅读。
+        SlotCommand command;
+        try {
+            command = CombatProtocol.decodeSlot(payload);
+        } catch (IllegalArgumentException failure) {
+            LOGGER.warn("无法读取服务器槽位指令", failure);
+            return;
+        }
+        int number = command.getSlot();
+        try {
+            switch (command.getOperation()) {
+                case SLOT_OPERATION_SET -> {
+                    slots.set(number, command.getTechniqueId(), Instant.now());
+                    save(client, "已设置第 " + number + " 槽");
+                }
+                case SLOT_OPERATION_CLEAR -> {
+                    // 清空当前档不修改其他服务器的配置。
+                    profiles.clear(number, Instant.now());
+                    save(client, "已清空第 " + number + " 槽");
+                }
+                case SLOT_OPERATION_LIST -> {
+                    slots.lines().forEach(line ->
+                            client.player.displayClientMessage(Component.literal(line), false /* overlay */));
+                }
+            }
+        } catch (IllegalArgumentException failure) {
+            actionbar(client, failure.getMessage());
         }
     }
 
@@ -300,56 +347,6 @@ public final class CombatClient implements ClientModInitializer {
         // 操作反馈保留动作栏，与十槽图标同时显示。
         if (client.player != null) {
             client.player.displayClientMessage(Component.literal(message), true /* overlay */);
-        }
-    }
-
-    private final class Commands implements CombatCommandTree.Actions<FabricClientCommandSource> {
-        @Override
-        public int set(FabricClientCommandSource source, int number, String technique) {
-            // 命令校验和按键选择使用同一套已学列表。
-            try {
-                requireWorld(source);
-                slots.set(number, technique, Instant.now());
-                save(source.getClient(), "已设置第 " + number + " 槽");
-                return 1;
-            } catch (IllegalArgumentException failure) {
-                actionbar(source.getClient(), failure.getMessage());
-                return 0;
-            }
-        }
-
-        @Override
-        public int clear(FabricClientCommandSource source, int number) {
-            // 清空当前档不修改其他服务器的配置。
-            try {
-                requireWorld(source);
-                profiles.clear(number, Instant.now());
-                save(source.getClient(), "已清空第 " + number + " 槽");
-                return 1;
-            } catch (IllegalArgumentException failure) {
-                actionbar(source.getClient(), failure.getMessage());
-                return 0;
-            }
-        }
-
-        @Override
-        public int list(FabricClientCommandSource source) {
-            // 十槽列表放在聊天反馈中以便完整阅读，状态提示仍使用动作栏。
-            slots.lines().forEach(line -> source.sendFeedback(Component.literal(line)));
-            return 1;
-        }
-
-        @Override
-        public java.util.List<String> suggestions(String prefix) {
-            // 只补全当前服务器推送的功法。
-            return slots.suggestions(prefix);
-        }
-
-        private void requireWorld(FabricClientCommandSource source) {
-            // 客户端菜单不能修改上一连接的档案。
-            if (source.getClient().player == null || source.getClient().getConnection() == null) {
-                throw new IllegalArgumentException("请先进入世界再设置战斗槽");
-            }
         }
     }
 }
