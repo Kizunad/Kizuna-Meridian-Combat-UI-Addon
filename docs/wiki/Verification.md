@@ -291,6 +291,12 @@ GameTest 玩家改用功法库 testFixtures 的 `TestPlayers.logIn` 与 `Recordi
 未单独设时限的用例显式写 `maxTicks = 100`，沿用 1.20.1 注解默认值；26.2 默认只有 20 tick。
 
 clientTest 依赖 `-PcombatFullAssembly` 完整装配，Human 等上游尚未全部迁到 26.2，本次只编译 `clientTest` 源集，没有运行。
+完整装配就绪后这样运行。Linux 无显示环境统一清掉 `DISPLAY`、`WAYLAND_DISPLAY` 并用 Xvfb 加 Mesa 软件渲染（`LIBGL_ALWAYS_SOFTWARE=1`，llvmpipe）：26.2 客户端在 WSLg 有显示时会卡在 `glfwShowWindow`，Xvfb 下默认的 Mesa d3d12 驱动在退出时让 JVM 崩溃，Gradle 判为失败。
+
+```bash
+env -u DISPLAY -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-screen 0 1280x960x24" ./gradlew -PcombatFullAssembly :fabric:runClientTest
+```
+
 26.2 每帧先提取 HUD、后渲染，提取回调时主画面仍是上一帧，所以截图改为在下一次 HUD 回调时截取上一帧，异步写盘完成后才计数；这一流程同样未实际运行。
 真实客户端的越肩相机、按键、HUD 图标与两处客户端 Mixin（`CameraMixin` 改注入 `alignWithEntity` 里的 `setPosition(DDD)`，`ClientPlayerMixin` 改注入 `ClientInput.tick`）都未在 26.2 客户端运行验证。
 开启实验性新矿车行为时，原版乘坐矿车的相机走 `setPosition(Vec3)`，越肩偏移在这种情况下不生效。本页其余 1.20.1 时期的结果不代表 26.2 已验证。
