@@ -110,12 +110,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 物种与档位都有补全，位置沿用原版坐标；省略位置则在命令源位置生成。命令需要权限 2：
 
 ```text
-/meridian humanoid summon vindicator true_qi ~ ~ ~5
-/meridian humanoid inspect @e[type=minecraft:vindicator,sort=nearest,limit=1]
+/meridian humanoid spawn vindicator true_qi ~ ~ ~5
+/meridian body status @e[type=minecraft:vindicator,sort=nearest,limit=1]
 /give @s meridian_humanoid:vindicator_true_qi_spawn_egg
 ```
 
-生成反馈包含实体名称、档位与 UUID；`inspect` 应输出 `档位=TRUE_QI`。
+生成反馈包含实体名称、档位与 UUID；`body status` 应输出 `档位=TRUE_QI`。
 它会带原版铁斧，自动学会调息、轻步、蓄力三卷和破门上卷、中卷，另有 UUID 分桶决定的下卷机会。
 要测试游炁可将 `true_qi` 改为 `wandering_qi`；七种生人均有两档，共 14 个蛋。
 普通原版 `/summon minecraft:vindicator` 仍随机抽档；不支持虚构的 `Realm` NBT。
@@ -223,7 +223,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 ```text
 /setblock ~ ~ ~2 minecraft:oak_door[facing=north,half=lower]
 /setblock ~ ~1 ~2 minecraft:oak_door[facing=north,half=upper]
-/meridian humanoid summon vindicator true_qi ~ ~ ~5
+/meridian humanoid spawn vindicator true_qi ~ ~ ~5
 /gamerule mobGriefing true
 ```
 
@@ -245,7 +245,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 **村民撤退。** 生成一个游炁村民，空手打它一拳：
 
 ```text
-/meridian humanoid summon villager wandering_qi ~ ~ ~3
+/meridian humanoid spawn villager wandering_qi ~ ~ ~3
 ```
 
 它不会像原版那样乱跑恐慌，而是先放轻步，再背对你跃步拉开到约 12 格外；你走远或停手一阵后它回去干活。
@@ -254,7 +254,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 **村民还手。** 换成真炁村民，给它铁斧并教会叩门，再打它一拳：
 
 ```text
-/meridian humanoid summon villager true_qi ~ ~ ~3
+/meridian humanoid spawn villager true_qi ~ ~ ~3
 /item replace entity @e[type=minecraft:villager,sort=nearest,limit=1] weapon.mainhand with minecraft:iron_axe
 /meridian_debug technique learn @e[type=minecraft:villager,sort=nearest,limit=1] meridian_door_breaker:knock
 ```
@@ -270,7 +270,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 **卫道士突击。** 生成一只真炁卫道士，站在约 6 格外不动：
 
 ```text
-/meridian humanoid summon vindicator true_qi ~ ~ ~6
+/meridian humanoid spawn vindicator true_qi ~ ~ ~6
 ```
 
 它先蓄力、放轻步，再跃到你身前一两格起手破门式；双臂虚脱后会背向跃步拉开，恢复后再回来。
@@ -278,8 +278,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 **两只卫道士互打。** 生成两只真炁卫道士后用调试命令让它们互相仇恨：
 
 ```text
-/meridian humanoid summon vindicator true_qi ~ ~ ~4
-/meridian humanoid summon vindicator true_qi ~ ~ ~10
+/meridian humanoid spawn vindicator true_qi ~ ~ ~4
+/meridian humanoid spawn vindicator true_qi ~ ~ ~10
 /meridian_debug aggro @e[type=minecraft:vindicator,sort=nearest,limit=1] @e[type=minecraft:vindicator,sort=furthest,limit=1] mutual
 ```
 
