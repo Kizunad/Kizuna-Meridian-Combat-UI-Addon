@@ -9,6 +9,7 @@ import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotCommand;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotOperation;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
 import dev.kizuna.meridian.fabric.MeridianCommands;
+import dev.kizuna.meridian.fabric.ProtobufChannel;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
@@ -18,13 +19,11 @@ import dev.kizuna.meridian.technique.server.TechniqueErrors;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
+import net.fabricmc.fabric.api.networking.v1.ClientboundPlayChannelEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.fabricmc.fabric.api.networking.v1.S2CPlayChannelEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.commands.CommandSourceStack;
-import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -51,16 +50,16 @@ public final class CombatFabric implements ModInitializer {
     @Override
     public void onInitialize() {
         // JOIN 延后一 tick 推送，保证各宿主均完成玩家认领。
-        ServerPlayNetworking.registerGlobalReceiver(CombatChannels.PRESS,
-                (server, player, handler, buffer, sender) -> receive(server, player, buffer));
+        ServerPlayNetworking.registerGlobalReceiver(CombatChannels.PRESS.type(),
+                (payload, context) -> receive(context.player(), payload));
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             UUID uuid = handler.player.getUUID();
             pausedKnown.remove(uuid);
             reportedFailures.remove(uuid);
             pendingKnown.add(uuid);
         });
-        S2CPlayChannelEvents.REGISTER.register((handler, sender, server, channels) -> {
-            if (channels.contains(CombatChannels.KNOWN)) {
+        ClientboundPlayChannelEvents.REGISTER.register((handler, sender, server, channels) -> {
+            if (channels.contains(CombatChannels.KNOWN.type().id())) {
                 sentKnown.remove(handler.player.getUUID());
                 pendingKnown.add(handler.player.getUUID());
             }
@@ -96,16 +95,12 @@ public final class CombatFabric implements ModInitializer {
         reportedFailures.clear();
     }
 
-    public void receive(MinecraftServer server, ServerPlayer player, FriendlyByteBuf buffer) {
-        // 网络线程不解码；入队前限制包长和频率，避免无界任务堆积。
-        int size = buffer.readableBytes();
-        if (size == 0 || size > CombatProtocol.MAX_PRESS_BYTES
-                || !limiter.accept(player.getUUID(), System.nanoTime())) {
+    public void receive(ServerPlayer player, ProtobufChannel.Payload payload) {
+        // 26.2 的收包回调已在服务端线程；解码前先限制包长和频率，空包与超长包直接丢弃。
+        if (!CombatChannels.PRESS.accepts(payload) || !limiter.accept(player.getUUID(), System.nanoTime())) {
             return;
         }
-        byte[] payload = new byte[size];
-        buffer.readBytes(payload);
-        server.execute(() -> process(player, payload));
+        process(player, payload.bytes());
     }
 
     public static void process(ServerPlayer player, byte[] payload) {
@@ -123,11 +118,11 @@ public final class CombatFabric implements ModInitializer {
         try {
             var outcome = casting().cast(playerUuid, press);
             if (outcome.getFailure() != TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED) {
-                player.displayClientMessage(Component.literal(outcome.getReason()), true /* overlay */);
+                player.sendSystemMessage(Component.literal(outcome.getReason()), true /* overlay */);
             }
         } catch (RuntimeException failure) {
             LOGGER.warn("战斗施放失败：{}", playerUuid, failure);
-            player.displayClientMessage(Component.literal("当前无法施放功法"), true /* overlay */);
+            player.sendSystemMessage(Component.literal("当前无法施放功法"), true /* overlay */);
         }
     }
 
@@ -151,7 +146,7 @@ public final class CombatFabric implements ModInitializer {
             pendingKnown.remove(uuid);
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
             if (player == null || pausedKnown.contains(uuid)
-                    || !ServerPlayNetworking.canSend(player, CombatChannels.KNOWN)) {
+                    || !ServerPlayNetworking.canSend(player, CombatChannels.KNOWN.type())) {
                 continue;
             }
             try {
@@ -170,9 +165,7 @@ public final class CombatFabric implements ModInitializer {
         if (snapshot.equals(sentKnown.get(uuid))) {
             return;
         }
-        var payload = PacketByteBufs.create();
-        payload.writeBytes(snapshot.toByteArray());
-        ServerPlayNetworking.send(player, CombatChannels.KNOWN, payload);
+        ServerPlayNetworking.send(player, CombatChannels.KNOWN.payload(snapshot.toByteArray()));
         sentKnown.put(uuid, snapshot);
     }
 
@@ -189,7 +182,7 @@ public final class CombatFabric implements ModInitializer {
         }
         if (reportedFailures.add(uuid)) {
             LOGGER.warn("无法推送玩家已学功法：{}", uuid, failure);
-            player.displayClientMessage(Component.literal("已学功法暂时无法同步"), true /* overlay */);
+            player.sendSystemMessage(Component.literal("已学功法暂时无法同步"), true /* overlay */);
         }
     }
 
@@ -235,13 +228,11 @@ public final class CombatFabric implements ModInitializer {
         private int send(CommandSourceStack source, SlotCommand.Builder command) throws CommandSyntaxException {
             // 槽位只存在玩家客户端：控制台执行直接报错；客户端没声明接收通道时明确失败，不静默吞掉。
             ServerPlayer player = source.getPlayerOrException();
-            if (!ServerPlayNetworking.canSend(player, CombatChannels.SLOT)) {
+            if (!ServerPlayNetworking.canSend(player, CombatChannels.SLOT.type())) {
                 source.sendFailure(Component.literal("客户端未安装战斗界面，无法修改本地战斗槽"));
                 return 0;
             }
-            var payload = PacketByteBufs.create();
-            payload.writeBytes(command.build().toByteArray());
-            ServerPlayNetworking.send(player, CombatChannels.SLOT, payload);
+            ServerPlayNetworking.send(player, CombatChannels.SLOT.payload(command.build().toByteArray()));
             return 1;
         }
     }

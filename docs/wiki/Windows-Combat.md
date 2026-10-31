@@ -33,7 +33,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 /difficulty normal
 /meridian opening complete all
 /meridian qi fill
-/gamerule meridianTechniquePlayerBreakBlocks true
+/gamerule meridian_human:technique_player_break_blocks true
 /gamerule mobGriefing true
 ```
 

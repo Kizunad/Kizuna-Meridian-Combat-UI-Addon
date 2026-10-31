@@ -1,6 +1,7 @@
 package dev.kizuna.meridian.combat.fabric.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
+import com.mojang.blaze3d.platform.NativeImage;
 import dev.kizuna.meridian.combat.core.CombatConfigFile;
 import dev.kizuna.meridian.combat.core.CombatHud;
 import dev.kizuna.meridian.combat.core.CombatIds;
@@ -10,17 +11,18 @@ import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.GameType;
 import org.lwjgl.glfw.GLFW;
 
@@ -46,6 +48,7 @@ public final class CombatHudClientTest implements ClientModInitializer {
     private static final Path SCREENS = Path.of("../hud-screens");
     private static final Path REPORT = Path.of("../clienttest-results.txt");
     private static final List<String> CASES = List.of("four-states", "empty", "pressed", "released", "restored");
+    private static final int TOTAL_CAPTURES = CASES.size() * (FINAL_SCALE - INITIAL_SCALE + 1);
     private static final String TECHNIQUE = "meridian_door_breaker:knock";
     private static final Path CONFIG = FabricLoader.getInstance().getConfigDir().resolve("kizuna-meridian-combat.json");
     /** 每个指令步骤最多等 10 秒（200 tick），超时视为失败。 */
@@ -56,6 +59,7 @@ public final class CombatHudClientTest implements ClientModInitializer {
     private int scale = INITIAL_SCALE;
     private int caseIndex;
     private int captures;
+    private boolean shotPending;
     private boolean finished;
     private CombatHud hud;
     private CombatProfiles profiles;
@@ -75,13 +79,14 @@ public final class CombatHudClientTest implements ClientModInitializer {
                 replies.add(message);
             }
         });
-        HudRenderCallback.EVENT.register((context, delta) -> render(context));
+        HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("meridian_combat_client_test", "capture"),
+                (context, deltaTracker) -> render(context));
     }
 
-    private void render(GuiGraphics context) {
+    private void render(GuiGraphicsExtractor context) {
         // 截图夹具只存在于测试源码集，不向正式客户端增加调试状态或网络接口。
         var client = Minecraft.getInstance();
-        if (finished || ticks < READY_TICKS || client.player == null || client.getOverlay() != null) {
+        if (finished || ticks < READY_TICKS || client.player == null || client.gui.overlay() != null) {
             return;
         }
         try {
@@ -97,9 +102,13 @@ public final class CombatHudClientTest implements ClientModInitializer {
                 commands(client);
                 return;
             }
+            if (scale > FINAL_SCALE) {
+                // 全部画完后只等截图异步写盘。
+                return;
+            }
             if (client.options.guiScale().get() != scale) {
                 client.options.guiScale().set(scale);
-                client.resizeDisplay();
+                client.resizeGui();
                 return;
             }
             drawCase(context, client);
@@ -117,12 +126,14 @@ public final class CombatHudClientTest implements ClientModInitializer {
         renderer = field(entry, "renderer", CombatHudRenderer.class);
         slots = field(entry, "slots", CombatSlots.class);
         KeyMapping tenthKey = field(entry, "slotTenKey", KeyMapping.class);
-        client.options.keyHotbarSlots[0].setKey(InputConstants.getKey(GLFW.GLFW_KEY_Q, 0));
-        tenthKey.setKey(InputConstants.getKey(GLFW.GLFW_KEY_Z, 0));
+        client.options.keyHotbarSlots[0].setKey(InputConstants.Type.KEYSYM.getOrCreate(GLFW.GLFW_KEY_Q));
+        tenthKey.setKey(InputConstants.Type.KEYSYM.getOrCreate(GLFW.GLFW_KEY_Z));
         KeyMapping.resetMapping();
-        client.options.hideGui = false;
+        if (client.gui.hud.isHidden()) {
+            client.gui.hud.toggle();
+        }
         client.options.pauseOnLostFocus = false;
-        client.setScreen(null);
+        client.gui.setScreen(null);
         Files.createDirectories(SCREENS);
         var server = client.getSingleplayerServer();
         var uuid = client.player.getUUID();
@@ -155,7 +166,7 @@ public final class CombatHudClientTest implements ClientModInitializer {
             }
             case SET -> {
                 if (savedFirstSlot().equals(TECHNIQUE)) {
-                    if (ClientCommandManager.getActiveDispatcher().getRoot().getChild("meridian") != null) {
+                    if (ClientCommands.getActiveDispatcher().getRoot().getChild("meridian") != null) {
                         throw new IllegalStateException("客户端注册了 meridian 根，会遮住服务端 /meridian");
                     }
                     replies.clear();
@@ -187,10 +198,16 @@ public final class CombatHudClientTest implements ClientModInitializer {
         return new CombatConfigFile(CONFIG).load().snapshot().get(profiles.current()).slots().get(0);
     }
 
-    private void drawCase(GuiGraphics context, Minecraft client) throws Exception {
-        // 前两例等待稳定画面；后三例连续保存，验证实际两个反馈帧与恢复帧。
-        client.gui.getChat().clearMessages(false /* clearHistory */);
-        client.getToasts().clear();
+    private void drawCase(GuiGraphicsExtractor context, Minecraft client) {
+        // 前两例等待稳定画面；后三例逐例保存，验证实际两个反馈帧与恢复帧。
+        // 26.2 每帧先提取 GUI 再统一绘制，本回调时主画面还是上一帧，所以画完一例后在下一帧回调里截图，
+        // 截图那一帧不画也不推进反馈帧，按下、松开、恢复仍是连续三个绘制帧。
+        if (shotPending) {
+            capture(client);
+            return;
+        }
+        client.gui.hud.getChat().clearMessages(false /* clearHistory */);
+        client.gui.toastManager().clear();
         String name = CASES.get(caseIndex);
         var now = Instant.now();
         for (int number = 1; number <= CombatIds.SLOT_COUNT; number++) {
@@ -209,17 +226,33 @@ public final class CombatHudClientTest implements ClientModInitializer {
         if (caseIndex < 2 && ++frames < SETTLE_FRAMES) {
             return;
         }
-        context.flush();
-        try (var image = Screenshot.takeScreenshot(client.getMainRenderTarget())) {
-            image.writeToFile(SCREENS.resolve("gui-" + scale + "-" + name + ".png"));
-        }
-        captures++;
+        shotPending = true;
+    }
+
+    private void capture(Minecraft client) {
+        // 截取上一帧完整画面，再切到下一例；三个缩放都画完后 scale 超出范围，只等写盘。
+        shotPending = false;
+        Path file = SCREENS.resolve("gui-" + scale + "-" + CASES.get(caseIndex) + ".png");
+        Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(), image -> save(image, file));
         frames = 0;
         if (++caseIndex == CASES.size()) {
             caseIndex = 0;
-            if (++scale > FINAL_SCALE) {
+            scale++;
+        }
+    }
+
+    private void save(NativeImage image, Path file) {
+        // 截图在之后的帧里异步回读；全部写盘后才结束，避免关闭客户端时丢图。已因失败结束时只释放图像。
+        try (image) {
+            if (finished) {
+                return;
+            }
+            image.writeToFile(file);
+            if (++captures == TOTAL_CAPTURES) {
                 finish(null);
             }
+        } catch (IOException failure) {
+            finish(failure.toString());
         }
     }
 

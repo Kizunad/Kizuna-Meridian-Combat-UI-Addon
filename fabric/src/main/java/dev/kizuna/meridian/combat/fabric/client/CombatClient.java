@@ -6,7 +6,6 @@ import dev.kizuna.meridian.combat.core.CombatDirection;
 import dev.kizuna.meridian.combat.core.CombatIds;
 import dev.kizuna.meridian.combat.core.CombatInput;
 import dev.kizuna.meridian.combat.core.CombatHud;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import dev.kizuna.meridian.combat.core.CombatProfiles;
 import dev.kizuna.meridian.combat.core.CombatProtocol;
 import dev.kizuna.meridian.combat.core.CombatSlots;
@@ -15,14 +14,15 @@ import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotCommand;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.storage.LevelResource;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
@@ -36,7 +36,8 @@ import java.util.Map;
 /** START_CLIENT_TICK 消费架势内按键，视角控制器接管越肩输入和渲染。 */
 public final class CombatClient implements ClientModInitializer {
     private static final Logger LOGGER = LoggerFactory.getLogger("meridian_combat");
-    private static final String KEY_CATEGORY = "category.meridian_combat";
+    private static final KeyMapping.Category KEY_CATEGORY =
+            KeyMapping.Category.register(Identifier.fromNamespaceAndPath("meridian_combat", "general"));
     private final CombatHud hud = new CombatHud();
     private final CombatInput input = new CombatInput();
     private final CombatConfigFile file = new CombatConfigFile(FabricLoader.getInstance().getConfigDir()
@@ -54,11 +55,11 @@ public final class CombatClient implements ClientModInitializer {
     public void onInitializeClient() {
         // 初始化本地状态与独立按键，不更改原版快捷栏键绑定。
         load();
-        stanceKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.meridian_combat.stance",
+        stanceKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.meridian_combat.stance",
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_R, KEY_CATEGORY));
-        slotTenKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.meridian_combat.slot_ten",
+        slotTenKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.meridian_combat.slot_ten",
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_0, KEY_CATEGORY));
-        viewKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.meridian_combat.view",
+        viewKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.meridian_combat.view",
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_V, KEY_CATEGORY));
         ClientTickEvents.START_CLIENT_TICK.register(this::tick);
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> join(client));
@@ -66,11 +67,13 @@ public final class CombatClient implements ClientModInitializer {
         registerKnown();
         registerSlotCommands();
         renderer = new CombatHudRenderer(hud, profiles, slotTenKey);
-        HudRenderCallback.EVENT.register((context, tickDelta) -> {
-            if (input.state() == CombatInput.State.ACTIVE) {
-                renderer.render(context);
-            }
-        });
+        // 挂在原版 HUD 最后，与旧 HudRenderCallback 一样叠在所有原版 HUD 元素之上。
+        HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("meridian_combat", "hud"),
+                (context, deltaTracker) -> {
+                    if (input.state() == CombatInput.State.ACTIVE) {
+                        renderer.render(context);
+                    }
+                });
     }
 
     private void load() {
@@ -103,7 +106,7 @@ public final class CombatClient implements ClientModInitializer {
     }
 
     private void disconnect() {
-        // 清理已学缓存并使尚未处理的旧连接网络回调失效。
+        // 清理已学缓存与 HUD 投影，并按断线退出架势；旧连接的包在断线后由原版直接丢弃。
         slots.updateKnown(Map.of());
         hud.clear();
         CombatInput.State before = input.state();
@@ -112,21 +115,12 @@ public final class CombatClient implements ClientModInitializer {
     }
 
     private void registerKnown() {
-        // 网络线程仅复制有界字节，客户端线程完成解码和整份替换。
-        ClientPlayNetworking.registerGlobalReceiver(CombatChannels.KNOWN,
-                (client, handler, buffer, sender) -> {
-                    int size = buffer.readableBytes();
-                    if (size > CombatProtocol.MAX_KNOWN_BYTES) {
-                        return;
-                    }
-                    byte[] payload = new byte[size];
-                    buffer.readBytes(payload);
-                    client.execute(() -> {
-                        if (client.getConnection() == handler) {
-                            applyKnown(payload);
-                        }
-                    });
-                });
+        // 26.2 的收包回调已在客户端线程，直接解码并整份替换。空包是合法的空列表，所以不用 accepts，只丢弃超长包。
+        ClientPlayNetworking.registerGlobalReceiver(CombatChannels.KNOWN.type(), (payload, context) -> {
+            if (payload.bytes().length <= CombatProtocol.MAX_KNOWN_BYTES) {
+                applyKnown(payload.bytes());
+            }
+        });
     }
 
     private void applyKnown(byte[] payload) {
@@ -146,21 +140,12 @@ public final class CombatClient implements ClientModInitializer {
     }
 
     private void registerSlotCommands() {
-        // 服务端 /meridian combat slot 只转发操作；网络线程复制有界字节，客户端线程解码并改本地槽位。
-        ClientPlayNetworking.registerGlobalReceiver(CombatChannels.SLOT,
-                (client, handler, buffer, sender) -> {
-                    int size = buffer.readableBytes();
-                    if (size > CombatProtocol.MAX_SLOT_BYTES) {
-                        return;
-                    }
-                    byte[] payload = new byte[size];
-                    buffer.readBytes(payload);
-                    client.execute(() -> {
-                        if (client.getConnection() == handler) {
-                            applySlotCommand(client, payload);
-                        }
-                    });
-                });
+        // 服务端 /meridian combat slot 只转发操作；回调已在客户端线程，丢弃空包与超长包后解码并改本地槽位。
+        ClientPlayNetworking.registerGlobalReceiver(CombatChannels.SLOT.type(), (payload, context) -> {
+            if (CombatChannels.SLOT.accepts(payload)) {
+                applySlotCommand(context.client(), payload.bytes());
+            }
+        });
     }
 
     private void applySlotCommand(Minecraft client, byte[] payload) {
@@ -185,8 +170,7 @@ public final class CombatClient implements ClientModInitializer {
                     save(client, "已清空第 " + number + " 槽");
                 }
                 case SLOT_OPERATION_LIST -> {
-                    slots.lines().forEach(line ->
-                            client.player.displayClientMessage(Component.literal(line), false /* overlay */));
+                    slots.lines().forEach(line -> client.player.sendSystemMessage(Component.literal(line)));
                 }
             }
         } catch (IllegalArgumentException failure) {
@@ -200,7 +184,7 @@ public final class CombatClient implements ClientModInitializer {
         CombatInput.State before = input.state();
         input.reconcile(availability);
         CombatInput.Screen screen = CombatInput.Screen.CLOSED;
-        if (client.screen != null) {
+        if (client.gui.screen() != null) {
             screen = CombatInput.Screen.OPEN;
         }
         if (!pendingWarning.isEmpty() && client.player != null) {
@@ -224,7 +208,7 @@ public final class CombatClient implements ClientModInitializer {
     private void toggle(Minecraft client, CombatInput.Availability availability, CombatInput.Screen screen) {
         // 接收通道握手是进入条件，不增加额外的架势同步消息。
         CombatInput.Support support = CombatInput.Support.UNSUPPORTED;
-        if (client.getConnection() != null && ClientPlayNetworking.canSend(CombatChannels.PRESS)) {
+        if (client.getConnection() != null && ClientPlayNetworking.canSend(CombatChannels.PRESS.type())) {
             support = CombatInput.Support.SUPPORTED;
         }
         actionbar(client, input.toggle(availability, screen, support));
@@ -281,9 +265,7 @@ public final class CombatClient implements ClientModInitializer {
                 .setMoveX(direction.x())
                 .setMoveZ(direction.z())
                 .build();
-        var payload = PacketByteBufs.create();
-        payload.writeBytes(request.toByteArray());
-        ClientPlayNetworking.send(CombatChannels.PRESS, payload);
+        ClientPlayNetworking.send(CombatChannels.PRESS.payload(request.toByteArray()));
     }
 
     private static int axis(KeyMapping positive, KeyMapping negative) {
@@ -346,7 +328,7 @@ public final class CombatClient implements ClientModInitializer {
     private static void actionbar(Minecraft client, String message) {
         // 操作反馈保留动作栏，与十槽图标同时显示。
         if (client.player != null) {
-            client.player.displayClientMessage(Component.literal(message), true /* overlay */);
+            client.player.sendOverlayMessage(Component.literal(message));
         }
     }
 }

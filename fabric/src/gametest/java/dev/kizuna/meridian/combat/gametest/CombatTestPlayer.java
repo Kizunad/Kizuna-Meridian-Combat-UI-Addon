@@ -5,26 +5,22 @@ import dev.kizuna.meridian.combat.core.CombatProtocol;
 import dev.kizuna.meridian.combat.fabric.CombatChannels;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotCommand;
+import dev.kizuna.meridian.fabric.ProtobufChannel;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
+import dev.kizuna.meridian.technique.fabric.testing.RecordingConnection;
+import dev.kizuna.meridian.technique.fabric.testing.TestPlayers;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
+import net.fabricmc.fabric.impl.networking.RegistrationPayload;
 import net.minecraft.gametest.framework.GameTestHelper;
-import net.minecraft.network.Connection;
-import net.minecraft.network.PacketSendListener;
-import net.minecraft.network.chat.Component;
-import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.PacketFlow;
-import net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket;
+import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
+import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
-import net.minecraft.network.protocol.game.ServerboundCustomPayloadPacket;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ClientInformation;
 import net.minecraft.server.level.ServerPlayer;
-import java.net.InetSocketAddress;
-import java.net.SocketAddress;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Function;
 
 /** 接入真实玩家管理器和 Fabric 接收器，仅把套接字换成记录连接。 */
 final class CombatTestPlayer implements AutoCloseable {
@@ -39,31 +35,30 @@ final class CombatTestPlayer implements AutoCloseable {
     }
 
     CombatTestPlayer(GameTestHelper context, UUID uuid) {
-        // JOIN、通道注册、发送与断线事件使用生产路径。
+        // JOIN、通道注册、发送与断线事件使用生产路径；连接不预先声明通道，由用例按需补注册。
         var world = context.getLevel();
         var server = world.getServer();
         body = CombatTestHost.bind(uuid);
-        connection = new RecordingConnection();
+        connection = new RecordingConnection(List.of());
         player = new ServerPlayer(server, world,
-                new GameProfile(uuid, "Combat" + uuid.toString().substring(0, UUID_NAME_LENGTH)));
-        server.getPlayerList().placeNewPlayer(connection, player);
+                new GameProfile(uuid, "Combat" + uuid.toString().substring(0, UUID_NAME_LENGTH)),
+                ClientInformation.createDefault());
+        TestPlayers.logIn(player, connection);
     }
 
     void registerKnown() {
         // 模拟客户端在 JOIN 后声明接收通道，触发正式的通道注册回调。
-        send(new ResourceLocation("minecraft", "register"),
-                CombatChannels.KNOWN.toString().getBytes(StandardCharsets.UTF_8));
+        register(CombatChannels.KNOWN);
     }
 
     void registerSlot() {
         // 模拟装了本模组的客户端声明槽位指令通道；不声明的玩家视同客户端未装本模组。
-        send(new ResourceLocation("minecraft", "register"),
-                CombatChannels.SLOT.toString().getBytes(StandardCharsets.UTF_8));
+        register(CombatChannels.SLOT);
     }
 
     void press(byte[] bytes) {
         // 不直接调用业务处理器，验证全局接收器确实注册且执行。
-        send(CombatChannels.PRESS, bytes);
+        send(CombatChannels.PRESS.payload(bytes));
     }
 
     void learn() {
@@ -75,79 +70,50 @@ final class CombatTestPlayer implements AutoCloseable {
         TechniqueFabric.service().learn(player.getUUID(), reference);
     }
 
-    private void send(ResourceLocation channel, byte[] bytes) {
-        // 复制后经过正式 handler；回调必须在返回前取得独立的有界字节。
-        var buffer = PacketByteBufs.create();
-        buffer.writeBytes(bytes);
-        try {
-            player.connection.handleCustomPayload(new ServerboundCustomPayloadPacket(channel, buffer));
-        } finally {
-            buffer.release();
-        }
+    List<KnownTechniques> known() {
+        // 按发送顺序解码记录下的已学列表，与真实客户端用同一个有界解码器。
+        return decoded(CombatChannels.KNOWN, CombatProtocol::decodeKnown);
+    }
+
+    List<SlotCommand> slots() {
+        // 只看发给本玩家的槽位指令。
+        return decoded(CombatChannels.SLOT, CombatProtocol::decodeSlot);
+    }
+
+    List<String> overlays() {
+        // 动作栏消息是带 overlay 标记的系统消息，聊天区消息不计入。
+        return connection.packets().stream()
+                .filter(ClientboundSystemChatPacket.class::isInstance)
+                .map(ClientboundSystemChatPacket.class::cast)
+                .filter(ClientboundSystemChatPacket::overlay)
+                .map(message -> message.content().getString())
+                .toList();
+    }
+
+    private <T> List<T> decoded(ProtobufChannel channel, Function<byte[], T> decoder) {
+        // 测试连接记录的是未编码的载荷对象，直接取其中的字节。
+        return connection.packets().stream()
+                .filter(ClientboundCustomPayloadPacket.class::isInstance)
+                .map(packet -> ((ClientboundCustomPayloadPacket) packet).payload())
+                .filter(payload -> payload.type().equals(channel.type()))
+                .map(payload -> decoder.apply(((ProtobufChannel.Payload) payload).bytes()))
+                .toList();
+    }
+
+    private void register(ProtobufChannel channel) {
+        // 与真实客户端一样经 minecraft:register 声明可收通道，服务端走正式的通道注册事件。
+        send(new RegistrationPayload(RegistrationPayload.REGISTER, List.of(channel.type().id())));
+    }
+
+    private void send(CustomPacketPayload payload) {
+        // 经过正式的游戏阶段网络处理器，回调在返回前同步执行。
+        player.connection.handleCustomPayload(new ServerboundCustomPayloadPacket(payload));
     }
 
     @Override
     public void close() {
         // 先发断线事件取消动作，再撤销宿主认领。
-        player.connection.onDisconnect(Component.literal("战斗测试完成"));
+        connection.disconnectFromClient();
         CombatTestHost.unbind(player.getUUID());
-    }
-
-    static final class RecordingConnection extends Connection {
-        final List<KnownTechniques> known = new ArrayList<>();
-        final List<SlotCommand> slots = new ArrayList<>();
-        final List<String> overlays = new ArrayList<>();
-
-        RecordingConnection() {
-            // 无外部网络，保留服务端发包语义用于断言。
-            super(PacketFlow.SERVERBOUND);
-        }
-
-        @Override
-        public boolean isConnected() {
-            // 玩家在测试清理前保持已连接状态。
-            return true;
-        }
-
-        @Override
-        public SocketAddress getRemoteAddress() {
-            // 玩家管理器日志需要有效地址，不建立真实连接。
-            return new InetSocketAddress("127.0.0.1", 0);
-        }
-
-        @Override
-        public void send(Packet<?> packet) {
-            // 覆盖两个公开发送入口，避免连接基类把包积存在待发队列。
-            record(packet);
-        }
-
-        @Override
-        public void send(Packet<?> packet, PacketSendListener callbacks) {
-            // 回调在此不产生网络确认，测试只观测服务端提交的内容。
-            record(packet);
-        }
-
-        private void record(Packet<?> packet) {
-            // 在发送时复制数据，后续不依赖 FriendlyByteBuf 的引用计数生命周期。
-            if (packet instanceof ClientboundCustomPayloadPacket payload) {
-                if (payload.getIdentifier().equals(CombatChannels.KNOWN)) {
-                    known.add(CombatProtocol.decodeKnown(bytes(payload)));
-                }
-                if (payload.getIdentifier().equals(CombatChannels.SLOT)) {
-                    slots.add(CombatProtocol.decodeSlot(bytes(payload)));
-                }
-            }
-            if (packet instanceof ClientboundSystemChatPacket message && message.overlay()) {
-                overlays.add(message.content().getString());
-            }
-        }
-
-        private static byte[] bytes(ClientboundCustomPayloadPacket payload) {
-            // 只读拷贝，不移动读指针。
-            var buffer = payload.getData();
-            byte[] bytes = new byte[buffer.readableBytes()];
-            buffer.getBytes(buffer.readerIndex(), bytes);
-            return bytes;
-        }
     }
 }

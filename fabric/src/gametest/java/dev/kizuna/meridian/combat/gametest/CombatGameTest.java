@@ -12,17 +12,19 @@ import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotOperation;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.server.TechniqueState;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.commands.CommandSourceStack;
-import net.minecraft.gametest.framework.GameTest;
-import net.minecraft.gametest.framework.GameTestAssertException;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.permissions.LevelBasedPermissionSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static dev.kizuna.meridian.combat.gametest.CombatGameTestTicks.DEFAULT_TIMEOUT;
+
 /** 专用服务端验证正式通道、公开功法服务与推送事件之间的接线。 */
-public final class CombatGameTest implements FabricGameTest {
+public final class CombatGameTest {
     private static final long SYNC_TICKS = 2;
     private static final long REFRESH_TICKS = 6;
     private static final long COOLDOWN_ELAPSED = 500;
@@ -36,7 +38,7 @@ public final class CombatGameTest implements FabricGameTest {
     private static final long PAUSED_OBSERVATION_TICKS = 21;
     private static final String SLOT = "meridian combat slot ";
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void pausedHostClearsHudStopsPollingAndResumesAfterReconnect(GameTestHelper context) {
         // 暂停清空旧投影且停止轮询，只有真实重连才能重新取得宿主状态。
         var fixture = new CombatTestPlayer(context);
@@ -54,9 +56,9 @@ public final class CombatGameTest implements FabricGameTest {
         var uuid = fixture.player.getUUID();
         try (fixture) {
             context.assertTrue(fixture.body.pausedQueries == 1, "暂停后仍重复决策或查询");
-            var messages = fixture.connection.known;
+            var messages = fixture.known();
             context.assertTrue(messages.get(messages.size() - 1).getTechniquesCount() == 0, "暂停未清旧列表");
-            context.assertTrue(fixture.connection.overlays.isEmpty(), "暂停反复弹出动作栏错误");
+            context.assertTrue(fixture.overlays().isEmpty(), "暂停反复弹出动作栏错误");
         }
         var reconnected = new CombatTestPlayer(context, uuid);
         reconnected.registerKnown();
@@ -70,7 +72,7 @@ public final class CombatGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void boundedDecodeAndCast(GameTestHelper context) {
         // 无效包不能修改身体；正常包按已学精确版本和归一化方向施放。
         try (var fixture = new CombatTestPlayer(context)) {
@@ -97,14 +99,14 @@ public final class CombatGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void chineseRejections(GameTestHelper context) {
         // 未学、目录外和冷却拒绝必须真实回传动作栏，不能改变可信知识。
         try (var fixture = new CombatTestPlayer(context)) {
             fixture.learn();
             fixture.press(press(CombatTestContent.OTHER, 0, 0));
             fixture.press(press("combat_test:missing", 0, 0));
-            context.assertTrue(fixture.connection.overlays.equals(List.of("你还不会这门功法", "你还不会这门功法")),
+            context.assertTrue(fixture.overlays().equals(List.of("你还不会这门功法", "你还不会这门功法")),
                     "未学或目录外原因没有按公开服务中文回传");
             fixture.press(press(CombatTestContent.TECHNIQUE, 0, 0));
             var active = TechniqueState.read(fixture.body.current()).getActiveCast();
@@ -114,12 +116,12 @@ public final class CombatGameTest implements FabricGameTest {
             TechniqueFabric.service().tick();
             context.assertFalse(TechniqueState.read(fixture.body.current()).hasActiveCast(), "起手完成后没有收势");
             fixture.press(press(CombatTestContent.TECHNIQUE, 0, 0));
-            context.assertTrue(fixture.connection.overlays.get(2).equals("气息尚未平复"), "冷却原因没有中文回传");
+            context.assertTrue(fixture.overlays().get(2).equals("气息尚未平复"), "冷却原因没有中文回传");
         }
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void networkRateLimit(GameTestHelper context) {
         // 同一玩家第 21 包被入口丢弃，其他玩家的请求仍被服务接受。
         try (var blocked = new CombatTestPlayer(context); var other = new CombatTestPlayer(context)) {
@@ -129,7 +131,7 @@ public final class CombatGameTest implements FabricGameTest {
                 blocked.press(press(CombatTestContent.OTHER, 0, 0));
             }
             blocked.press(press(CombatTestContent.TECHNIQUE, 0, 0));
-            context.assertTrue(blocked.connection.overlays.size() == PressLimiter.MAX_PER_SECOND,
+            context.assertTrue(blocked.overlays().size() == PressLimiter.MAX_PER_SECOND,
                     "正式通道没有执行每玩家限流");
             context.assertFalse(TechniqueState.read(blocked.body.current()).hasActiveCast(), "限流包仍然起手");
             other.press(press(CombatTestContent.TECHNIQUE, 0, 0));
@@ -138,22 +140,22 @@ public final class CombatGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void knownChangedPush(GameTestHelper context) {
         // JOIN 后延迟注册接收通道，首次空列表与真实学会事件都必须推送。
         var fixture = new CombatTestPlayer(context);
         context.runAfterDelay(SYNC_TICKS, () -> {
             fixture.registerKnown();
             context.runAfterDelay(SYNC_TICKS, () -> {
-                context.assertTrue(fixture.connection.known.size() == 1, "通道后注册未补发初始列表");
-                context.assertTrue(fixture.connection.known.get(0).getTechniquesCount() == 0, "初次列表不是空表");
+                context.assertTrue(fixture.known().size() == 1, "通道后注册未补发初始列表");
+                context.assertTrue(fixture.known().get(0).getTechniquesCount() == 0, "初次列表不是空表");
                 fixture.learn();
                 context.runAfterDelay(SYNC_TICKS, () -> verifyKnown(context, fixture));
             });
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void hudPushesIconsCooldownAndBodyUnavailability(GameTestHelper context) {
         // 捕获周期刷新的真实 S2C 包，覆盖冷却开始、递减、结束和身体失能。
         var fixture = new CombatTestPlayer(context);
@@ -196,7 +198,7 @@ public final class CombatGameTest implements FabricGameTest {
         });
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void slotCommandForwardsToExecutorOnly(GameTestHelper context) {
         // 已学列表推送之后再查补全：功法候选取服务端最近一次推送给该玩家的列表。
         var fixture = new CombatTestPlayer(context);
@@ -217,7 +219,7 @@ public final class CombatGameTest implements FabricGameTest {
         // 权限 0 玩家能补全并执行 combat slot；操作只下发给执行者本人，控制台和未装本模组的客户端被拒绝。
         var server = context.getLevel().getServer();
         var dispatcher = server.getCommands().getDispatcher();
-        var source = fixture.player.createCommandSourceStack().withPermission(0);
+        var source = fixture.player.createCommandSourceStack().withPermission(LevelBasedPermissionSet.ALL);
         context.assertTrue(dispatcher.getRoot().getChild("meridian_combat") == null, "旧根 /meridian_combat 应已删除");
         context.assertTrue(suggestions(dispatcher, source, "meridian combat ").contains("slot"),
                 "权限 0 玩家看不到 combat slot");
@@ -227,10 +229,10 @@ public final class CombatGameTest implements FabricGameTest {
                 "槽号补全不是 1–10");
         context.assertTrue(suggestions(dispatcher, source, SLOT + "set 1 ").equals(Set.of(CombatTestContent.TECHNIQUE)),
                 "功法补全没有取已推送的已学列表");
-        run(dispatcher, source, SLOT + "set 10 " + CombatTestContent.TECHNIQUE);
-        run(dispatcher, source, SLOT + "clear 3");
-        run(dispatcher, source, SLOT + "list");
-        var sent = fixture.connection.slots;
+        run(context, dispatcher, source, SLOT + "set 10 " + CombatTestContent.TECHNIQUE);
+        run(context, dispatcher, source, SLOT + "clear 3");
+        run(context, dispatcher, source, SLOT + "list");
+        var sent = fixture.slots();
         context.assertTrue(sent.size() == 3, "三条槽位指令应各下发一次，实际 " + sent.size());
         context.assertTrue(sent.get(0).getOperation() == SlotOperation.SLOT_OPERATION_SET
                 && sent.get(0).getSlot() == CombatIds.SLOT_COUNT
@@ -240,18 +242,19 @@ public final class CombatGameTest implements FabricGameTest {
         context.assertTrue(sent.get(2).getOperation() == SlotOperation.SLOT_OPERATION_LIST, "list 下发内容错误");
         context.assertTrue(rejects(dispatcher, server.createCommandSourceStack(), SLOT + "list"),
                 "控制台没有本地槽位，执行应失败");
-        var bystanderSource = bystander.player.createCommandSourceStack().withPermission(0);
-        context.assertTrue(run(dispatcher, bystanderSource, SLOT + "list") == 0, "未声明槽位通道的客户端应失败");
-        context.assertTrue(bystander.connection.slots.isEmpty(), "槽位操作发给了执行者以外的玩家");
+        var bystanderSource = bystander.player.createCommandSourceStack().withPermission(LevelBasedPermissionSet.ALL);
+        context.assertTrue(run(context, dispatcher, bystanderSource, SLOT + "list") == 0,
+                "未声明槽位通道的客户端应失败");
+        context.assertTrue(bystander.slots().isEmpty(), "槽位操作发给了执行者以外的玩家");
     }
 
-    private static int run(CommandDispatcher<CommandSourceStack> dispatcher, CommandSourceStack source,
-                           String command) {
+    private static int run(GameTestHelper context, CommandDispatcher<CommandSourceStack> dispatcher,
+                           CommandSourceStack source, String command) {
         // 合法指令不应在解析阶段失败；失败时带上原文，便于定位。
         try {
             return dispatcher.execute(command, source);
         } catch (CommandSyntaxException failure) {
-            throw new GameTestAssertException(command + " 解析失败：" + failure.getMessage());
+            throw context.assertionException(Component.literal(command + " 解析失败：" + failure.getMessage()));
         }
     }
 
@@ -278,7 +281,7 @@ public final class CombatGameTest implements FabricGameTest {
     private static dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique latest(
             CombatTestPlayer fixture) {
         // 只读取真实网络记录的最后一份完整快照。
-        var messages = fixture.connection.known;
+        var messages = fixture.known();
         return messages.get(messages.size() - 1).getTechniques(0);
     }
 
@@ -297,8 +300,8 @@ public final class CombatGameTest implements FabricGameTest {
     private static void verifyKnown(GameTestHelper context, CombatTestPlayer fixture) {
         // 断言捕获的真实 S2C 包，不能只验证事件被调用。
         try (fixture) {
-            context.assertTrue(fixture.connection.known.size() == 2, "KNOWN_CHANGED 没有推送更新");
-            var known = fixture.connection.known.get(1);
+            context.assertTrue(fixture.known().size() == 2, "KNOWN_CHANGED 没有推送更新");
+            var known = fixture.known().get(1);
             context.assertTrue(known.getTechniquesCount() == 1, "已学列表数量错误");
             var technique = known.getTechniques(0);
             context.assertTrue(technique.getId().equals(CombatTestContent.TECHNIQUE), "已学 ID 错误");

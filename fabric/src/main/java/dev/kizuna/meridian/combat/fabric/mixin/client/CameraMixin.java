@@ -4,7 +4,7 @@ import dev.kizuna.meridian.combat.fabric.CombatCameraCollision;
 import dev.kizuna.meridian.combat.fabric.client.CombatViewController;
 import net.minecraft.client.Camera;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /** 复用原版插值后的眼位，只替换越肩相机旋转、偏移和整段遮挡收缩。 */
 @Mixin(Camera.class)
 abstract class CameraMixin {
-    @Shadow private BlockGetter level;
+    @Shadow private Level level;
     @Shadow private Entity entity;
     @Shadow private Vec3 position;
     @Shadow private boolean detached;
@@ -26,11 +26,12 @@ abstract class CameraMixin {
     /** 更新相机位置及方块坐标缓存。 */
     @Shadow protected abstract void setPosition(Vec3 pos);
 
-    @Inject(method = "setup", at = @At(value = "INVOKE",
+    @Inject(method = "alignWithEntity", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/client/Camera;setPosition(DDD)V", shift = At.Shift.AFTER),
             cancellable = true)
     private void combat$shoulder(CallbackInfo callback) {
-        // 在原版后退之前接管，碰撞覆盖肩侧和抬高偏移而不只是后方距离。
+        // 在原版后退之前接管，碰撞覆盖肩侧和抬高偏移而不只是后方距离。26.2 的跟随逻辑从 setup 移到
+        // alignWithEntity；只有非乘坐新版矿车的路径用 setPosition(DDD)，乘坐新版矿车时保持原版视角。
         var controller = CombatViewController.forShoulder(entity);
         if (controller == null) {
             return;

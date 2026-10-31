@@ -2,15 +2,14 @@
 
 ## 当前图标栏构建
 
-需要 Python 3.12 以上、Java 17 工具链和运行 Gradle 8.14.6 的 JDK 21 及以上（Loom 1.13.6 的要求，产物仍以 Java 17 编译）。
+需要 Python 3.12 以上与 JDK 25：Gradle 9.8.0 守护进程按 `gradle/gradle-daemon-jvm.properties` 选用本机 JDK 25（Loom 1.19.3），产物以 Java 25 编译。
 相邻仓库位置、产物路径与第三方版本由 Framework 的 `scripts/workspace.gradle`、装配清单与版本目录提供，默认读取相邻本地 `Kizuna-Meridian-Technique-Framework` 与 `Kizuna-Meridian-Mod-Framework`。
 图标栏通过宿主公开 `inspect().body()` 查询身体，并使用功法库当前工作区的 `TechniqueState`、
 `TechniqueBinder` 和目录接口；这些接口尚未提交，不能改用首版的 89e37ec 冻结快照。
-功法 fabric 与 server 以源码组合，编译与运行使用功法仓当前源码构建的 named 开发 JAR，随本仓先行构建。
+功法 fabric 与 server 以源码组合，编译与运行直接使用功法仓当前源码构建的普通 JAR（26.2 不混淆，无映射），随本仓先行构建。
 本仓不修改依赖源码，依赖的构建输出位于各仓忽略目录。
-Linux 默认 Java 17 提示路径是 `/usr/lib/jvm/java-17-openjdk-amd64`；其他系统须安装 Java 17，并按本机位置调整 Gradle 工具链路径。
 可用 Gradle `kizuna.dir.technique`、`kizuna.dir.framework` 属性按清单 id 指定依赖路径（`kizunaCodeDir` 整体改指代码根目录）；功法库自身组合的 Framework 同样按清单定位，两处指向同一构建。
-编译、单测与游戏运行任务均指定 Java 17 工具链。在仓库根目录执行：
+编译、单测与游戏运行任务均指定 Java 25 工具链。在仓库根目录执行：
 
 ```bash
 bash "gradlew" test build --console=plain
@@ -21,7 +20,7 @@ git diff --check
 
 根 `build` 包含文档链接检查；GameTest 独立启动专用服务端。
 发行文件为 `fabric/build/libs/kizuna-meridian-combat-ui-addon-fabric-0.1.1-SNAPSHOT.jar`。
-`-sources.jar` 是源码；`fabric/build/devlibs` 中的文件用于开发环境，不用于安装。
+`-sources.jar` 是源码，不用于安装；26.2 不混淆，不再另出 `fabric/build/devlibs` 开发 JAR。
 原 `scripts/prepare_dependencies.py` 固定 89e37ec 功法与 e285947 Framework，仅用于首版历史复现，已在构建收拢时删除；
 当前构建按组合构建直接使用功法库与 Framework 源码。历史验证见下文及原交付记录。
 
@@ -278,3 +277,20 @@ xvfb-run -a -s "-screen 0 1280x960x24" ./gradlew -PcombatFullAssembly :fabric:ru
 ```
 
 结果：JUnit 41/41（core 38、fabric 3）；GameTest 9/9，49 个模组；clientTest `success=true commands=true captures=10`，87 个模组。
+
+## 迁到 Minecraft 26.2（S3）
+
+2026-11-01 在 26.2（不混淆，Loom 1.19.3、Java 25）上重新执行：
+
+```bash
+./gradlew test build :fabric:runGametest
+```
+
+结果：JUnit 41/41（core 38、fabric 3），零失败、错误、跳过；GameTest 9/9，另有 26.2 运行器自带的 `minecraft:always_pass`，51 个模组；文档检查 13 页通过。用例数与 S2 相同。
+GameTest 玩家改用功法库 testFixtures 的 `TestPlayers.logIn` 与 `RecordingConnection`，仍经正式登录、通道注册与 `handleCustomPayload` 收发，记录连接保存未编码的载荷对象。
+未单独设时限的用例显式写 `maxTicks = 100`，沿用 1.20.1 注解默认值；26.2 默认只有 20 tick。
+
+clientTest 依赖 `-PcombatFullAssembly` 完整装配，Human 等上游尚未全部迁到 26.2，本次只编译 `clientTest` 源集，没有运行。
+26.2 每帧先提取 HUD、后渲染，提取回调时主画面仍是上一帧，所以截图改为在下一次 HUD 回调时截取上一帧，异步写盘完成后才计数；这一流程同样未实际运行。
+真实客户端的越肩相机、按键、HUD 图标与两处客户端 Mixin（`CameraMixin` 改注入 `alignWithEntity` 里的 `setPosition(DDD)`，`ClientPlayerMixin` 改注入 `ClientInput.tick`）都未在 26.2 客户端运行验证。
+开启实验性新矿车行为时，原版乘坐矿车的相机走 `setPosition(Vec3)`，越肩偏移在这种情况下不生效。本页其余 1.20.1 时期的结果不代表 26.2 已验证。

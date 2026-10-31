@@ -71,20 +71,19 @@ public final class CombatViewController {
     }
 
     public void turn(LocalPlayer player) {
-        // Input.tick 后读取本 tick 移动轴，在原版移动与发包之前限速转身。
-        var input = player.input;
+        // ClientInput.tick 后读取本 tick 移动轴，在原版移动与发包之前限速转身。
+        // 26.2 的移动向量已归一化（x 向左、y 向前），朝向只取方向，与原先的两个冲量等价。
+        var move = player.input.getMoveVector();
         float currentYaw = player.getYRot();
-        float target = CombatViewMath.movementYaw(input.forwardImpulse, input.leftImpulse,
-                view.camera().yaw(), currentYaw);
+        float target = CombatViewMath.movementYaw(move.y, move.x, view.camera().yaw(), currentYaw);
         float yaw = CombatViewMath.turnYaw(currentYaw, target, profiles.view().turnDegreesPerTick());
         player.setYRot(yaw);
     }
 
     public float jumpYaw(LocalPlayer player) {
         // 疾跑跳跃的额外水平冲量也跟随移动方向，不能被未转完的人物拖偏。
-        var input = player.input;
-        return CombatViewMath.movementYaw(input.forwardImpulse, input.leftImpulse,
-                view.camera().yaw(), player.getYRot());
+        var move = player.input.getMoveVector();
+        return CombatViewMath.movementYaw(move.y, move.x, view.camera().yaw(), player.getYRot());
     }
 
     public CombatCamera.Offset cameraOffset() {
@@ -98,7 +97,7 @@ public final class CombatViewController {
     }
 
     private static void applyPerspective(Minecraft client, CameraType selected) {
-        // 复用原版切换的着色器与地形刷新语义，只在实际变化时执行。
+        // 复用原版 F5 切换的着色器语义，只在实际变化时执行；26.2 原版切换不再要求刷新地形。
         CameraType previous = client.options.getCameraType();
         if (previous == selected) {
             return;
@@ -111,7 +110,6 @@ public final class CombatViewController {
             }
             client.gameRenderer.checkEntityPostEffect(cameraEntity);
         }
-        client.levelRenderer.needsUpdate();
     }
 
     private static CombatView.Perspective toCore(CameraType perspective) {

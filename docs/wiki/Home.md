@@ -15,6 +15,6 @@ v1.1 增加第一人称/越肩两模式、镜头独立绕看、镜头相对移�
 - [当前工作区整合候选](Integration-Candidate.md)：完整玩家路径测试与 Windows 候选打包入口。
 - [首版本地交付记录](Delivery.md)：首版文件清单与当时验证结果。
 
-源码分成 `shared/` Protobuf、`core/` Java 17 逻辑和 `fabric/` Minecraft 适配。
+源码分成 `shared/` Protobuf、`core/` Java 25 逻辑和 `fabric/` Minecraft 适配。
 当前版本增加架势内十槽图标 HUD，保留动作栏提示；没有接入动画、连招或预输入。
 模组命名空间为 `meridian_combat`。

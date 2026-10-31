@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(LocalPlayer.class)
 abstract class ClientPlayerMixin {
     @Inject(method = "aiStep", at = @At(value = "INVOKE",
-            target = "Lnet/minecraft/client/player/Input;tick(ZF)V", shift = At.Shift.AFTER))
+            target = "Lnet/minecraft/client/player/ClientInput;tick()V", shift = At.Shift.AFTER))
     private void combat$turn(CallbackInfo callback) {
         // 原版随后移动并发送真实人物角度，不需要自定义视角同步协议。
         var player = (LocalPlayer) (Object) this;

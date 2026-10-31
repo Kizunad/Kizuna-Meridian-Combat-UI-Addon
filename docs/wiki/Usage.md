@@ -1,6 +1,6 @@
 # 使用方法
 
-客户端和服务端均安装本附属、Fabric API 与功法框架；使用 Minecraft 1.20.1、Fabric Loader 0.16.10 以上、Java 17 以上。
+客户端和服务端均安装本附属、Fabric API 与功法框架；使用 Minecraft 26.2、Fabric Loader 0.20.1 以上、Java 25 以上。
 本附属不包含具体功法或玩家身体，整合服还须提供功法目录与实体宿主。
 
 ## 设置槽位

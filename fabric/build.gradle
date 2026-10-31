@@ -1,21 +1,19 @@
-plugins { id 'fabric-loom' }
+plugins { id 'net.fabricmc.fabric-loom' }
 description = '客户端架势与命令、服务端施放和已学列表同步。'
 repositories { maven { url = 'https://maven.fabricmc.net/' } }
 
 dependencies {
+    // 26.x 不混淆：直接用官方名编译，没有映射，模组依赖也不经重映射。
     minecraft libs.minecraft
-    mappings loom.officialMojangMappings()
-    modImplementation libs.fabric.loader
-    modImplementation libs.fabric.api
+    implementation libs.fabric.loader
+    implementation libs.fabric.api
     implementation project(':core')
     implementation 'dev.kizuna.meridian.technique:server'
-    // 完整装配按坐标重映射功法 fabric 时，Loom 以真实坐标重新加入 Framework server；本仓直接声明组合的 Framework server，
-    // 冲突时才会解析到同一组合工程，而不是去外部仓库找不存在的发布坐标。
+    // 直接使用 Framework server 的身体协议与服务端 API，按 settings 中的本地替换键解析到组合工程。
     implementation 'local.meridian:server'
-    // 组合进来的功法 fabric 直接取 named 开发 JAR：按坐标走 mod 重映射的缓存不随上游改动刷新，也不会先构建上游。
-    implementation('dev.kizuna.meridian.technique:fabric') { targetConfiguration = 'namedElements' }
-    // /meridian 注册点在 Framework fabric；取法同功法 fabric，GameTest 不走完整装配也要在运行时装入。
-    implementation('dev.kizuna.meridian:fabric') { targetConfiguration = 'namedElements' }
+    // 功法库与 /meridian 注册点（Framework fabric）以源码组合，依赖处写替换坐标；GameTest 不走完整装配也要在运行时装入。
+    implementation 'dev.kizuna.meridian.technique:fabric'
+    implementation 'dev.kizuna.meridian:fabric'
     include project(':core')
     include project(':shared')
     // 版本目录条目是 Provider，implementation 不返回依赖对象，嵌套声明单独写。
@@ -48,6 +46,10 @@ sourceSets {
         compileClasspath += sourceSets.main.compileClasspath + sourceSets.main.output
         runtimeClasspath += sourceSets.main.runtimeClasspath + sourceSets.main.output
     }
+}
+dependencies {
+    // 登录假玩家与记录连接夹具来自功法库的 testFixtures，与功法 fabric 同经源码组合解析。
+    gametestImplementation testFixtures('dev.kizuna.meridian.technique:fabric')
 }
 loom {
     mods {

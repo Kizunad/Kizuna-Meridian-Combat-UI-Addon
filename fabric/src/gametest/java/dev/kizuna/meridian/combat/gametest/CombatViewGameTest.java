@@ -6,17 +6,18 @@ import dev.kizuna.meridian.combat.core.CombatViewSettings;
 import dev.kizuna.meridian.combat.fabric.CombatCameraCollision;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
 import dev.kizuna.meridian.technique.server.TechniqueState;
-import net.fabricmc.fabric.api.gametest.v1.FabricGameTest;
+import net.fabricmc.fabric.api.gametest.v1.GameTest;
 import net.minecraft.core.BlockPos;
-import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
+import static dev.kizuna.meridian.combat.gametest.CombatGameTestTicks.DEFAULT_TIMEOUT;
+
 /** 在真实方块世界核对镜头遮挡和人物射线，服务端不加载客户端 Mixin。 */
-public final class CombatViewGameTest implements FabricGameTest {
+public final class CombatViewGameTest {
     private static final BlockPos EYE_BLOCK = new BlockPos(3, 3, 3);
     private static final BlockPos BACK_WALL = new BlockPos(3, 3, 1);
     private static final BlockPos SIDE_WALL = new BlockPos(2, 3, 3);
@@ -27,7 +28,7 @@ public final class CombatViewGameTest implements FabricGameTest {
     private static final double CENTER = 0.5;
     private static final double EPSILON = 0.000001;
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void cameraClipsAgainstBackAndShoulderWalls(GameTestHelper context) {
         // 真实 VISUAL 方块形状阻挡后方和右肩偏移，拆除遮挡后立即恢复原距离。
         try (var fixture = new CombatTestPlayer(context)) {
@@ -54,7 +55,7 @@ public final class CombatViewGameTest implements FabricGameTest {
         context.succeed();
     }
 
-    @GameTest(template = FabricGameTest.EMPTY_STRUCTURE)
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
     public void rayAndCastFollowEntityFacingDespiteCameraOrbit(GameTestHelper context) {
         // 镜头朝北、人物朝西时，原版方块射线和正式施放方向仍朝西。
         try (var fixture = new CombatTestPlayer(context)) {
