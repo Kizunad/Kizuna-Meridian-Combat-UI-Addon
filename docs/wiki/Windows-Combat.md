@@ -31,7 +31,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 ```text
 /gamemode creative
 /difficulty normal
-/meridian opening complete @s all
+/meridian opening complete all
 /meridian zhenyuan fill
 /gamerule meridianTechniquePlayerBreakBlocks true
 /gamerule mobGriefing true
@@ -64,7 +64,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 
 清槽用 `/meridian combat slot clear 1`。旧 trial 槽会显示失效，应清空或改成已学的正式 ID。
 `set`、`clear` 的槽号补全 1–10，功法 ID 补全当前服务器已学列表。
-调试授予可用 `/meridian_technique learn @s <id>`；ID 补全当前目录的书、卷、式，整书一次原子学会。
+调试授予可用 `/meridian technique learn <id>`（省略目标即学给自己）；ID 补全当前目录的书、卷、式，整书一次原子学会。
 
 - R 进入/退出架势，即使没有学会或填槽也能进入。
 - 架势内 1–9 与 0 对应十槽；1–9 跟随原版快捷栏键位，滚轮仍可换持物。
@@ -207,7 +207,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 准备步骤中的开脉与补元后，右键阅读上卷，或直接学卷、填槽：
 
 ```text
-/meridian_technique learn @s meridian_door_breaker:upper
+/meridian technique learn meridian_door_breaker:upper
 /meridian combat slot set 4 meridian_door_breaker:cleave
 /meridian combat slot set 5 meridian_door_breaker:knock
 /meridian combat slot set 6 meridian_door_breaker:ram
