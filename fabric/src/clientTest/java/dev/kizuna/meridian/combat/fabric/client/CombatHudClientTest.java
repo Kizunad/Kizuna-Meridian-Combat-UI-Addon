@@ -1,5 +1,6 @@
 package dev.kizuna.meridian.combat.fabric.client;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import dev.kizuna.meridian.combat.core.CombatHud;
 import dev.kizuna.meridian.combat.core.CombatIds;
 import dev.kizuna.meridian.combat.core.CombatProfiles;
@@ -9,12 +10,11 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.client.util.ScreenshotRecorder;
-import net.minecraft.world.GameMode;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.Screenshot;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.world.level.GameType;
 import org.lwjgl.glfw.GLFW;
 
 import java.nio.file.Files;
@@ -52,9 +52,9 @@ public final class CombatHudClientTest implements ClientModInitializer {
         HudRenderCallback.EVENT.register((context, delta) -> render(context));
     }
 
-    private void render(DrawContext context) {
+    private void render(GuiGraphics context) {
         // 截图夹具只存在于测试源码集，不向正式客户端增加调试状态或网络接口。
-        var client = MinecraftClient.getInstance();
+        var client = Minecraft.getInstance();
         if (finished || ticks < READY_TICKS || client.player == null || client.getOverlay() != null) {
             return;
         }
@@ -67,9 +67,9 @@ public final class CombatHudClientTest implements ClientModInitializer {
                 return;
             }
             survival.join();
-            if (client.options.getGuiScale().getValue() != scale) {
-                client.options.getGuiScale().setValue(scale);
-                client.onResolutionChanged();
+            if (client.options.guiScale().get() != scale) {
+                client.options.guiScale().set(scale);
+                client.resizeDisplay();
                 return;
             }
             drawCase(context, client);
@@ -78,32 +78,32 @@ public final class CombatHudClientTest implements ClientModInitializer {
         }
     }
 
-    private void initialize(MinecraftClient client) throws Exception {
+    private void initialize(Minecraft client) throws Exception {
         // 读取正式入口已创建的对象，确保截图使用真实键位与同一个绘制实现。
         var entry = FabricLoader.getInstance().getEntrypoints("client", ClientModInitializer.class).stream()
                 .filter(CombatClient.class::isInstance).findFirst().orElseThrow();
         hud = field(entry, "hud", CombatHud.class);
         profiles = field(entry, "profiles", CombatProfiles.class);
         renderer = field(entry, "renderer", CombatHudRenderer.class);
-        KeyBinding tenthKey = field(entry, "slotTenKey", KeyBinding.class);
-        client.options.hotbarKeys[0].setBoundKey(InputUtil.fromKeyCode(GLFW.GLFW_KEY_Q, 0));
-        tenthKey.setBoundKey(InputUtil.fromKeyCode(GLFW.GLFW_KEY_Z, 0));
-        KeyBinding.updateKeysByCode();
-        client.options.hudHidden = false;
+        KeyMapping tenthKey = field(entry, "slotTenKey", KeyMapping.class);
+        client.options.keyHotbarSlots[0].setKey(InputConstants.getKey(GLFW.GLFW_KEY_Q, 0));
+        tenthKey.setKey(InputConstants.getKey(GLFW.GLFW_KEY_Z, 0));
+        KeyMapping.resetMapping();
+        client.options.hideGui = false;
         client.options.pauseOnLostFocus = false;
         client.setScreen(null);
         Files.createDirectories(SCREENS);
-        var server = client.getServer();
-        var uuid = client.player.getUuid();
+        var server = client.getSingleplayerServer();
+        var uuid = client.player.getUUID();
         survival = server.submit(() -> {
-            server.getPlayerManager().getPlayer(uuid).changeGameMode(GameMode.SURVIVAL);
+            server.getPlayerList().getPlayer(uuid).setGameMode(GameType.SURVIVAL);
         });
     }
 
-    private void drawCase(DrawContext context, MinecraftClient client) throws Exception {
+    private void drawCase(GuiGraphics context, Minecraft client) throws Exception {
         // 前两例等待稳定画面；后三例连续保存，验证实际两个反馈帧与恢复帧。
-        client.inGameHud.getChatHud().clear(false /* clearHistory */);
-        client.getToastManager().clear();
+        client.gui.getChat().clearMessages(false /* clearHistory */);
+        client.getToasts().clear();
         String name = CASES.get(caseIndex);
         var now = Instant.now();
         for (int number = 1; number <= CombatIds.SLOT_COUNT; number++) {
@@ -122,9 +122,9 @@ public final class CombatHudClientTest implements ClientModInitializer {
         if (caseIndex < 2 && ++frames < SETTLE_FRAMES) {
             return;
         }
-        context.draw();
-        try (var image = ScreenshotRecorder.takeScreenshot(client.getFramebuffer())) {
-            image.writeTo(SCREENS.resolve("gui-" + scale + "-" + name + ".png"));
+        context.flush();
+        try (var image = Screenshot.takeScreenshot(client.getMainRenderTarget())) {
+            image.writeToFile(SCREENS.resolve("gui-" + scale + "-" + name + ".png"));
         }
         captures++;
         frames = 0;
@@ -175,6 +175,6 @@ public final class CombatHudClientTest implements ClientModInitializer {
         } catch (Exception reportFailure) {
             throw new IllegalStateException(reportFailure);
         }
-        MinecraftClient.getInstance().scheduleStop();
+        Minecraft.getInstance().stop();
     }
 }

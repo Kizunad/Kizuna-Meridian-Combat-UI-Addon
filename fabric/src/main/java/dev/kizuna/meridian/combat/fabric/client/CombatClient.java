@@ -1,5 +1,6 @@
 package dev.kizuna.meridian.combat.fabric.client;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import dev.kizuna.meridian.combat.core.CombatConfigFile;
 import dev.kizuna.meridian.combat.core.CombatDirection;
 import dev.kizuna.meridian.combat.core.CombatIds;
@@ -20,11 +21,10 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.text.Text;
-import net.minecraft.util.WorldSavePath;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.level.storage.LevelResource;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,9 +44,9 @@ public final class CombatClient implements ClientModInitializer {
             .resolve("kizuna-meridian-combat.json"));
     private CombatProfiles profiles;
     private CombatSlots slots;
-    private KeyBinding stanceKey;
-    private KeyBinding slotTenKey;
-    private KeyBinding viewKey;
+    private KeyMapping stanceKey;
+    private KeyMapping slotTenKey;
+    private KeyMapping viewKey;
     private CombatViewController views;
     private CombatHudRenderer renderer;
     private String pendingWarning = "";
@@ -55,12 +55,12 @@ public final class CombatClient implements ClientModInitializer {
     public void onInitializeClient() {
         // 初始化本地状态与独立按键，不更改原版快捷栏键绑定。
         load();
-        stanceKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.meridian_combat.stance",
-                InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_R, KEY_CATEGORY));
-        slotTenKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.meridian_combat.slot_ten",
-                InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_0, KEY_CATEGORY));
-        viewKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.meridian_combat.view",
-                InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_V, KEY_CATEGORY));
+        stanceKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.meridian_combat.stance",
+                InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_R, KEY_CATEGORY));
+        slotTenKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.meridian_combat.slot_ten",
+                InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_0, KEY_CATEGORY));
+        viewKey = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.meridian_combat.view",
+                InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_V, KEY_CATEGORY));
         ClientTickEvents.START_CLIENT_TICK.register(this::tick);
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> join(client));
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> disconnect());
@@ -88,17 +88,17 @@ public final class CombatClient implements ClientModInitializer {
         views = new CombatViewController(profiles);
     }
 
-    private void join(MinecraftClient client) {
+    private void join(Minecraft client) {
         // 使用集成服务器的实际目录名，避免重命名存档显示名称后换档。
         slots.updateKnown(Map.of());
         hud.clear();
         String key;
-        var server = client.getServer();
+        var server = client.getSingleplayerServer();
         if (server != null) {
-            var folder = server.getSavePath(WorldSavePath.ROOT).normalize().getFileName();
+            var folder = server.getWorldPath(LevelResource.ROOT).normalize().getFileName();
             key = CombatIds.worldProfile(folder.toString());
         } else {
-            key = CombatIds.serverProfile(client.getCurrentServerEntry().address);
+            key = CombatIds.serverProfile(client.getCurrentServer().ip);
         }
         profiles.enter(key, Instant.now());
         save(client, "");
@@ -124,7 +124,7 @@ public final class CombatClient implements ClientModInitializer {
                     byte[] payload = new byte[size];
                     buffer.readBytes(payload);
                     client.execute(() -> {
-                        if (client.getNetworkHandler() == handler) {
+                        if (client.getConnection() == handler) {
                             applyKnown(payload);
                         }
                     });
@@ -147,20 +147,20 @@ public final class CombatClient implements ClientModInitializer {
         }
     }
 
-    private void tick(MinecraftClient client) {
+    private void tick(Minecraft client) {
         // 先处理失效状态，再决定是否取走原版快捷栏按键次数。
         CombatInput.Availability availability = availability(client);
         CombatInput.State before = input.state();
         input.reconcile(availability);
         CombatInput.Screen screen = CombatInput.Screen.CLOSED;
-        if (client.currentScreen != null) {
+        if (client.screen != null) {
             screen = CombatInput.Screen.OPEN;
         }
         if (!pendingWarning.isEmpty() && client.player != null) {
             actionbar(client, pendingWarning);
             pendingWarning = "";
         }
-        while (stanceKey.wasPressed()) {
+        while (stanceKey.consumeClick()) {
             toggle(client, availability, screen);
         }
         notifyStance(before);
@@ -168,25 +168,25 @@ public final class CombatClient implements ClientModInitializer {
         if (input.consumesHotbar(availability, screen)) {
             consumeSlots(client);
         } else {
-            while (slotTenKey.wasPressed()) {
+            while (slotTenKey.consumeClick()) {
                 // 独立按键在架势外不产生行为，也不积存到下次进入。
             }
         }
     }
 
-    private void toggle(MinecraftClient client, CombatInput.Availability availability, CombatInput.Screen screen) {
+    private void toggle(Minecraft client, CombatInput.Availability availability, CombatInput.Screen screen) {
         // 接收通道握手是进入条件，不增加额外的架势同步消息。
         CombatInput.Support support = CombatInput.Support.UNSUPPORTED;
-        if (client.getNetworkHandler() != null && ClientPlayNetworking.canSend(CombatChannels.PRESS)) {
+        if (client.getConnection() != null && ClientPlayNetworking.canSend(CombatChannels.PRESS)) {
             support = CombatInput.Support.SUPPORTED;
         }
         actionbar(client, input.toggle(availability, screen, support));
     }
 
-    private void consumeViewKeys(MinecraftClient client, CombatInput.Screen screen) {
+    private void consumeViewKeys(Minecraft client, CombatInput.Screen screen) {
         // 架势外或开屏时丢弃独立视角键计数；架势内 F5 交由两模式选择键替代。
         boolean active = views.view().active();
-        while (viewKey.wasPressed()) {
+        while (viewKey.consumeClick()) {
             if (active && screen == CombatInput.Screen.CLOSED && client.player != null) {
                 views.toggle(client.player);
                 views.reconcile(client, input.state());
@@ -198,25 +198,25 @@ public final class CombatClient implements ClientModInitializer {
             }
         }
         if (active) {
-            while (client.options.togglePerspectiveKey.wasPressed()) {
+            while (client.options.keyTogglePerspective.consumeClick()) {
                 // 不让原版三种视角覆盖架势会话；进入前的 F5 选择仍在退出时恢复。
             }
         }
     }
 
-    private void consumeSlots(MinecraftClient client) {
+    private void consumeSlots(Minecraft client) {
         // 直接沿用原版键位；滚轮不通过这些按下次数，因此仍能正常切物品。
-        for (int index = 0; index < client.options.hotbarKeys.length; index++) {
-            while (client.options.hotbarKeys[index].wasPressed()) {
+        for (int index = 0; index < client.options.keyHotbarSlots.length; index++) {
+            while (client.options.keyHotbarSlots[index].consumeClick()) {
                 press(client, index + 1);
             }
         }
-        while (slotTenKey.wasPressed()) {
+        while (slotTenKey.consumeClick()) {
             press(client, CombatIds.SLOT_COUNT);
         }
     }
 
-    private void press(MinecraftClient client, int number) {
+    private void press(Minecraft client, int number) {
         // 越肩出招取人物当前朝向；无输入传零，第一人称保留原有移动方向语义。
         renderer.press(number);
         CombatSlots.Selection selection = slots.select(number);
@@ -226,9 +226,9 @@ public final class CombatClient implements ClientModInitializer {
             return;
         }
         var options = client.options;
-        int forward = axis(options.forwardKey, options.backKey);
-        int sideways = axis(options.leftKey, options.rightKey);
-        CombatDirection direction = views.view().castDirection(forward, sideways, client.player.getYaw());
+        int forward = axis(options.keyUp, options.keyDown);
+        int sideways = axis(options.keyLeft, options.keyRight);
+        CombatDirection direction = views.view().castDirection(forward, sideways, client.player.getYRot());
         TechniquePress request = TechniquePress.newBuilder()
                 .setTechniqueId(selection.techniqueId())
                 .setMoveX(direction.x())
@@ -239,21 +239,21 @@ public final class CombatClient implements ClientModInitializer {
         ClientPlayNetworking.send(CombatChannels.PRESS, payload);
     }
 
-    private static int axis(KeyBinding positive, KeyBinding negative) {
+    private static int axis(KeyMapping positive, KeyMapping negative) {
         // 相反方向同时按下互相抵消，斜向由方向模型归一化。
         int result = 0;
-        if (positive.isPressed()) {
+        if (positive.isDown()) {
             result++;
         }
-        if (negative.isPressed()) {
+        if (negative.isDown()) {
             result--;
         }
         return result;
     }
 
-    private static CombatInput.Availability availability(MinecraftClient client) {
+    private static CombatInput.Availability availability(Minecraft client) {
         // 自动退出只依据当前连接与生命状态，开界面不取消架势。
-        if (client.player == null || client.getNetworkHandler() == null) {
+        if (client.player == null || client.getConnection() == null) {
             return CombatInput.Availability.DISCONNECTED;
         }
         if (!client.player.isAlive()) {
@@ -268,14 +268,14 @@ public final class CombatClient implements ClientModInitializer {
     private void notifyStance(CombatInput.State before) {
         // 主动切换与死亡断线复用相同钩子，动画订阅者可统一清理。
         CombatInput.State after = input.state();
-        views.reconcile(MinecraftClient.getInstance(), after);
+        views.reconcile(Minecraft.getInstance(), after);
         if (before != after) {
             renderer.clearFeedback();
             CombatStanceEvents.CHANGED.invoker().onChanged(after);
         }
     }
 
-    private void save(MinecraftClient client, String successMessage) {
+    private void save(Minecraft client, String successMessage) {
         // 保存结果与命令成功合并提示，避免动作栏后一次消息覆盖写入故障。
         boolean hasSuccessMessage = !successMessage.isEmpty();
         if (!file.writable()) {
@@ -296,10 +296,10 @@ public final class CombatClient implements ClientModInitializer {
         }
     }
 
-    private static void actionbar(MinecraftClient client, String message) {
+    private static void actionbar(Minecraft client, String message) {
         // 操作反馈保留动作栏，与十槽图标同时显示。
         if (client.player != null) {
-            client.player.sendMessage(Text.literal(message), true /* overlay */);
+            client.player.displayClientMessage(Component.literal(message), true /* overlay */);
         }
     }
 
@@ -335,7 +335,7 @@ public final class CombatClient implements ClientModInitializer {
         @Override
         public int list(FabricClientCommandSource source) {
             // 十槽列表放在聊天反馈中以便完整阅读，状态提示仍使用动作栏。
-            slots.lines().forEach(line -> source.sendFeedback(Text.literal(line)));
+            slots.lines().forEach(line -> source.sendFeedback(Component.literal(line)));
             return 1;
         }
 
@@ -347,7 +347,7 @@ public final class CombatClient implements ClientModInitializer {
 
         private void requireWorld(FabricClientCommandSource source) {
             // 客户端菜单不能修改上一连接的档案。
-            if (source.getClient().player == null || source.getClient().getNetworkHandler() == null) {
+            if (source.getClient().player == null || source.getClient().getConnection() == null) {
                 throw new IllegalArgumentException("请先进入世界再设置战斗槽");
             }
         }

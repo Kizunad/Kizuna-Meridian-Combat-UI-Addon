@@ -20,7 +20,6 @@ git diff --check
 ```
 
 根 `build` 包含文档链接检查；GameTest 独立启动专用服务端。
-`fabric/build.gradle` 的 `clearNestedJarCache` 在每次 `remapJar` 前删除 `fabric/build/loom-cache/temp/modprocessing`：Loom 只按坐标复用这里的嵌套 JAR，SNAPSHOT 坐标不变时会把旧的嵌套 JAR 打进发布 JAR。
 发行文件为 `fabric/build/libs/kizuna-meridian-combat-ui-addon-fabric-0.1.1-SNAPSHOT.jar`。
 `-sources.jar` 是源码；`fabric/build/devlibs` 中的文件用于开发环境，不用于安装。
 原 `scripts/prepare_dependencies.py` 固定 89e37ec 功法与 e285947 Framework，仅用于首版历史复现，已在构建收拢时删除；
@@ -41,7 +40,7 @@ git diff --check
 | CombatGameTest | 5 | 正式通道有界解码与施放、精确旧版权限、中文拒绝、入口限流、通道注册与 KNOWN_CHANGED 实际 S2C 推送 |
 | CombatViewGameTest | 2 | 真实方块后墙/侧墙整段收缩、人物射线与正式施放方向不随纯镜头角改变 |
 
-GameTest 玩家进入真实玩家管理器，调用正式 `ServerPlayNetworkHandler.onCustomPayload`，仅以记录连接替换真实套接字。
+GameTest 玩家进入真实玩家管理器，调用正式 `ServerGamePacketListenerImpl.handleCustomPayload`，仅以记录连接替换真实套接字。
 测试宿主的身体、时间结算、活动提交使用真实 Framework 存储与命令处理器，测试内容不会进入发行 JAR。
 
 JUnit XML 位于 `core/build/test-results/test` 与 `fabric/build/test-results/test`。
@@ -113,25 +112,26 @@ GameTest 报告中的实际名称（7 项）：
 
 无槽入口调整后的 JUnit XML 汇总为 30 项（core 28、fabric 2），失败、错误、跳过均为 0。
 GameTest XML 为 6 个 testcase、无 failure；日志确认 `All 6 required tests passed :)` 后正常停服。
-新增测试曾修正等价角度 180/-180 的断言，以及负零偏移、侧墙摆放和测试玩家 headYaw 的夹具问题。
-真实世界的射线读取 LivingEntity 头部角度；客户端 Mixin 将 headYaw/bodyYaw 同步到人物 yaw。
+新增测试曾修正等价角度 180/-180 的断言，以及负零偏移、侧墙摆放和测试玩家 yHeadRot 的夹具问题。
+真实世界的射线读取 LivingEntity 头部角度；客户端 Mixin 将 yHeadRot/yBodyRot 同步到人物 yaw。
 
 ## 屏幕输入调用顺序核验
 
 检查对象为本次构建的 Minecraft 1.20.1 / Yarn 1.20.1+build.10，以及 Fabric 生命周期 2.2.22+1802ada577。
 字节码输出保存在 `.local-deps/client-input.javap.txt` 与 `.local-deps/Mouse.javap.txt`，生命周期源码摘录保存在 `.local-deps/FabricMinecraftClientMixin.java`。
+下表按 Mojang 官方名书写；字节码与映射无关，当时按 Yarn 名执行的反汇编命令和证据文件名原样保留。
 
 | 入口 | 核验结论 |
 |---|---|
 | Fabric `MinecraftClientMixin.onStartTick` | `@Inject(at = @At("HEAD"), method = "tick")`，确实早于原版输入处理 |
-| `MinecraftClient.setScreen` | 屏幕非空分支在字节码偏移 149 调用 `KeyBinding.unpressAll()` |
-| `KeyBinding.unpressAll/reset/wasPressed` | reset 清零 timesPressed，wasPressed 每次减少一次计数 |
-| `Keyboard.onKey` | 屏幕先处理事件；若已消费立即返回；之后偏移 580 检查 currentScreen，非空不增加游戏按键计数 |
-| `Mouse.onMouseButton` | 屏幕已消费、currentScreen 非空或 overlay 非空时，均不增加游戏按键计数 |
-| `Mouse.lockCursor` / `KeyBinding.updatePressedStates` | 关屏只恢复 pressed 状态，不增加 timesPressed |
-| `HandledScreen.keyPressed` | 数字交换与背包关闭由原版屏幕处理，不依赖战斗按键消费 |
-| `MinecraftClient.tick/handleInputEvents` | 无屏幕时才处理原版按键；快捷栏处理位于开背包之前 |
-| `Mouse.onMouseScroll` | 原版直接调用 `PlayerInventory.scrollInHotbar`；本附属没有拦截 |
+| `Minecraft.setScreen` | 屏幕非空分支在字节码偏移 149 调用 `KeyMapping.releaseAll()` |
+| `KeyMapping.releaseAll/release/consumeClick` | release 清零 clickCount，consumeClick 每次减少一次计数 |
+| `KeyboardHandler.keyPress` | 屏幕先处理事件；若已消费立即返回；之后偏移 580 检查 screen，非空不增加游戏按键计数 |
+| `MouseHandler.onPress` | 屏幕已消费、screen 非空或 overlay 非空时，均不增加游戏按键计数 |
+| `MouseHandler.grabMouse` / `KeyMapping.setAll` | 关屏只恢复 isDown 状态，不增加 clickCount |
+| `AbstractContainerScreen.keyPressed` | 数字交换与背包关闭由原版屏幕处理，不依赖战斗按键消费 |
+| `Minecraft.tick/handleKeybinds` | 无屏幕时才处理原版按键；快捷栏处理位于开背包之前 |
+| `MouseHandler.onScroll` | 原版直接调用 `Inventory.swapPaint`；本附属没有拦截 |
 
 此版本 `Screen` 没有 `passEvents` 字段，不能套用其他版本的透传条件。
 普通原版界面内输入不会积存为关屏后的施放，架势状态保持；独立 0 的无效计数也会被丢弃。
@@ -217,7 +217,7 @@ xvfb-run -a "./gradlew" -I ".local-deps/v11-client-smoke.init.gradle" :fabric:ru
 命令退出 0，`BUILD SUCCESSFUL in 3m 24s`。虚拟声卡和 Fabric API 的 Mixin 类版本警告未阻止运行。
 
 日志明确显示 EntityMovementMixin、LivingEntityJumpMixin、ClientPlayerMixin、MouseMixin、CameraMixin
-分别应用到 Entity、LivingEntity、ClientPlayerEntity、Mouse、Camera。
+分别应用到 Entity、LivingEntity、LocalPlayer、MouseHandler、Camera。
 导出到 `fabric/build/playtest/.mixin.out/class` 的实际类经过 `javap -p -c` 检查，
 包含 relativeInput、jumpYaw、turn/alignModel、look、shoulder 回调调用，均无注入失败。
 反汇编保存在 `.local-deps/*.v11-mixed.javap.txt`，窗口截图为 `.local-deps/v11-client-smoke.png`。
@@ -225,12 +225,12 @@ xvfb-run -a "./gradlew" -I ".local-deps/v11-client-smoke.init.gradle" :fabric:ru
 
 ## 视角调用顺序核验
 
-反汇编证据为 `.local-deps/{Camera,GameRenderer,Mouse,ClientPlayerEntity,Entity,LivingEntity,KeyboardInput}.v11.javap.txt`。
-已核对 Mouse 的灵敏度/反转预处理后才调用 changeLookDirection；越肩仅替换其接收者。
-Input.tick 后才转身，之后由原版移动和发包；updateVelocity 在实体局部输入变成世界速度前换算坐标，
+反汇编证据为 `.local-deps/{Camera,GameRenderer,Mouse,ClientPlayerEntity,Entity,LivingEntity,KeyboardInput}.v11.javap.txt`（文件名沿用当时的 Yarn 类名）。
+已核对 MouseHandler 的灵敏度/反转预处理后才调用 turn；越肩仅替换其接收者。
+Input.tick 后才转身，之后由原版移动和发包；moveRelative 在实体局部输入变成世界速度前换算坐标，
 不通过临时改实体 yaw 达成移动。疾跑跳跃的额外冲量单独换算到移动目标朝向。
-GameRenderer 仍从人物 raycast/getRotationVec 取目标，LivingEntity 的插值 getYaw 读取 headYaw，
-因此本地人物 tick 结束同步 headYaw/bodyYaw 到真实 yaw。
+GameRenderer 仍从人物 pick/getViewVector 取目标，LivingEntity 的插值 getViewYRot 读取 yHeadRot，
+因此本地人物 tick 结束同步 yHeadRot/yBodyRot 到真实 yaw。
 原版相机只沿后方裁剪，本实现改为完整右上后段探测；形状与流体策略仍沿用 VISUAL/NONE。
 切换原版视角时同步调用着色器更新和地形刷新，避免只改枚举留下渲染状态。
 

@@ -84,9 +84,9 @@ Java 文件路径均位于对应模块的 `src/.../java/dev/kizuna/meridian/comb
 ## 屏幕输入与验证边界
 
 核对了实际 1.20.1 Yarn 字节码及本次 Fabric 生命周期源码。
-开屏经 `setScreen` 调用 `KeyBinding.unpressAll`，清空按下计数；屏幕存在时键盘/鼠标事件不进入游戏按键计数。
+开屏经 `setScreen` 调用 `KeyMapping.releaseAll`，清空按下计数；屏幕存在时键盘/鼠标事件不进入游戏按键计数。
 关屏恢复物理按住状态不增加按下计数；原版容器的数字交换键仍由屏幕处理。
-START_CLIENT_TICK 在原版 tick 入口，早于 `handleInputEvents`，满足架势内先消费 1–9 的要求。
+START_CLIENT_TICK 在原版 tick 入口，早于 `handleKeybinds`，满足架势内先消费 1–9 的要求。
 未发现原版界面内按键积存到关屏后误施放的问题，输入逻辑无需改动。
 同一 tick 中数字键与开背包键均已排队时，数字键在开屏前处理；原版也是先处理快捷栏再开背包。
 

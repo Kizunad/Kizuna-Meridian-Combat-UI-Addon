@@ -7,18 +7,17 @@ import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.minecraft.network.ClientConnection;
-import net.minecraft.network.NetworkSide;
-import net.minecraft.network.PacketCallbacks;
-import net.minecraft.network.packet.Packet;
-import net.minecraft.network.packet.c2s.play.CustomPayloadC2SPacket;
-import net.minecraft.network.packet.s2c.play.CustomPayloadS2CPacket;
-import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
-import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.test.TestContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
-
+import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.network.Connection;
+import net.minecraft.network.PacketSendListener;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.PacketFlow;
+import net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket;
+import net.minecraft.network.protocol.game.ClientboundSystemChatPacket;
+import net.minecraft.network.protocol.game.ServerboundCustomPayloadPacket;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -29,29 +28,29 @@ import java.util.UUID;
 /** 接入真实玩家管理器和 Fabric 接收器，仅把套接字换成记录连接。 */
 final class CombatTestPlayer implements AutoCloseable {
     private static final int UUID_NAME_LENGTH = 8;
-    final ServerPlayerEntity player;
+    final ServerPlayer player;
     final CombatTestHost.Body body;
     final RecordingConnection connection;
 
-    CombatTestPlayer(TestContext context) {
+    CombatTestPlayer(GameTestHelper context) {
         // 独立玩家避免测试间共享功法和暂停状态。
         this(context, UUID.randomUUID());
     }
 
-    CombatTestPlayer(TestContext context, UUID uuid) {
+    CombatTestPlayer(GameTestHelper context, UUID uuid) {
         // JOIN、通道注册、发送与断线事件使用生产路径。
-        var world = context.getWorld();
+        var world = context.getLevel();
         var server = world.getServer();
         body = CombatTestHost.bind(uuid);
         connection = new RecordingConnection();
-        player = new ServerPlayerEntity(server, world,
+        player = new ServerPlayer(server, world,
                 new GameProfile(uuid, "Combat" + uuid.toString().substring(0, UUID_NAME_LENGTH)));
-        server.getPlayerManager().onPlayerConnect(connection, player);
+        server.getPlayerList().placeNewPlayer(connection, player);
     }
 
     void registerKnown() {
         // 模拟客户端在 JOIN 后声明接收通道，触发正式的通道注册回调。
-        send(new Identifier("minecraft", "register"),
+        send(new ResourceLocation("minecraft", "register"),
                 CombatChannels.KNOWN.toString().getBytes(StandardCharsets.UTF_8));
     }
 
@@ -66,15 +65,15 @@ final class CombatTestPlayer implements AutoCloseable {
                 .setId(CombatTestContent.TECHNIQUE)
                 .setVersion(1)
                 .build();
-        TechniqueFabric.service().learn(player.getUuid(), reference);
+        TechniqueFabric.service().learn(player.getUUID(), reference);
     }
 
-    private void send(Identifier channel, byte[] bytes) {
+    private void send(ResourceLocation channel, byte[] bytes) {
         // 复制后经过正式 handler；回调必须在返回前取得独立的有界字节。
         var buffer = PacketByteBufs.create();
         buffer.writeBytes(bytes);
         try {
-            player.networkHandler.onCustomPayload(new CustomPayloadC2SPacket(channel, buffer));
+            player.connection.handleCustomPayload(new ServerboundCustomPayloadPacket(channel, buffer));
         } finally {
             buffer.release();
         }
@@ -83,27 +82,27 @@ final class CombatTestPlayer implements AutoCloseable {
     @Override
     public void close() {
         // 先发断线事件取消动作，再撤销宿主认领。
-        player.networkHandler.onDisconnected(Text.literal("战斗测试完成"));
-        CombatTestHost.unbind(player.getUuid());
+        player.connection.onDisconnect(Component.literal("战斗测试完成"));
+        CombatTestHost.unbind(player.getUUID());
     }
 
-    static final class RecordingConnection extends ClientConnection {
+    static final class RecordingConnection extends Connection {
         final List<KnownTechniques> known = new ArrayList<>();
         final List<String> overlays = new ArrayList<>();
 
         RecordingConnection() {
             // 无外部网络，保留服务端发包语义用于断言。
-            super(NetworkSide.SERVERBOUND);
+            super(PacketFlow.SERVERBOUND);
         }
 
         @Override
-        public boolean isOpen() {
+        public boolean isConnected() {
             // 玩家在测试清理前保持已连接状态。
             return true;
         }
 
         @Override
-        public SocketAddress getAddress() {
+        public SocketAddress getRemoteAddress() {
             // 玩家管理器日志需要有效地址，不建立真实连接。
             return new InetSocketAddress("127.0.0.1", 0);
         }
@@ -115,21 +114,21 @@ final class CombatTestPlayer implements AutoCloseable {
         }
 
         @Override
-        public void send(Packet<?> packet, PacketCallbacks callbacks) {
+        public void send(Packet<?> packet, PacketSendListener callbacks) {
             // 回调在此不产生网络确认，测试只观测服务端提交的内容。
             record(packet);
         }
 
         private void record(Packet<?> packet) {
-            // 在发送时复制数据，后续不依赖 PacketByteBuf 的引用计数生命周期。
-            if (packet instanceof CustomPayloadS2CPacket payload
-                    && payload.getChannel().equals(CombatChannels.KNOWN)) {
+            // 在发送时复制数据，后续不依赖 FriendlyByteBuf 的引用计数生命周期。
+            if (packet instanceof ClientboundCustomPayloadPacket payload
+                    && payload.getIdentifier().equals(CombatChannels.KNOWN)) {
                 var buffer = payload.getData();
                 byte[] bytes = new byte[buffer.readableBytes()];
                 buffer.getBytes(buffer.readerIndex(), bytes);
                 known.add(CombatProtocol.decodeKnown(bytes));
             }
-            if (packet instanceof GameMessageS2CPacket message && message.overlay()) {
+            if (packet instanceof ClientboundSystemChatPacket message && message.overlay()) {
                 overlays.add(message.content().getString());
             }
         }
