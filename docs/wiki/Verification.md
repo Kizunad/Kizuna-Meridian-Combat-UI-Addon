@@ -302,3 +302,9 @@ env -u DISPLAY -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-scree
 26.2 每帧先提取 HUD、后渲染，提取回调时主画面仍是上一帧，所以截图改为在下一次 HUD 回调时截取上一帧，异步写盘完成后才计数；这一流程同样未实际运行。
 真实客户端的越肩相机、按键、HUD 图标与两处客户端 Mixin（`CameraMixin` 改注入 `alignWithEntity` 里的 `setPosition(DDD)`，`ClientPlayerMixin` 改注入 `ClientInput.tick`）都未在 26.2 客户端运行验证。
 开启实验性新矿车行为时，原版乘坐矿车的相机走 `setPosition(Vec3)`，越肩偏移在这种情况下不生效。本页其余 1.20.1 时期的结果不代表 26.2 已验证。
+
+同日完整装配就绪后补跑（S3 阶段十六）：用功法库新夹具重跑 `:fabric:runGametest`，All 10 required tests passed（本仓 9 例加 `always_pass`），
+51 个模组；`-PcombatFullAssembly :fabric:runClientTest` 结果 `success=true commands=true captures=10 error=null`。
+混入配置为 `required: true`、`defaultRequire: 1`，客户端运行成功即说明 5 个客户端 Mixin 都已注入；
+10 张 HUD 截图与 1.20.1 逐张对比一致（背景场景与动作栏提示淡出时机不同，与 HUD 无关）。
+日志为相邻 remote-session 的 `handoff/logs/s3-anim-combat-runtime-gametest.log`、`s3-anim-combat-runtime-clienttest.log`。

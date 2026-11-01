@@ -40,8 +40,12 @@ python3 "scripts/package_windows_candidate.py"
 `VindicatorAssemblyGameTest`。复用正式 Human 登录，通过卷轴物品交互学习，通过
 `meridian_combat:press` 正式载荷入口施放蓄力、轻步、劈门和叩门，验证位移、力量、实伤与耐久。
 真炁卫道士经过原版 AI tick 自选破门斩，对在线玩家造成伤害，并在 `mob_griefing` 开启时劈木门。
-基础功法正式数据包与测试入口分开加载；4 项 JUnit、11 项 GameTest 已通过。
-日志为相邻 remote-session 的 `handoff/logs/integration-final-gametest.log`。
+基础功法正式数据包与测试入口分开加载。2026-11-01 在 26.2 上重跑（S3）：基础功法 `test build :gametest:runGametest`
+JUnit 11/11、GameTest 38/38（本仓 37 例加 26.2 运行器自带的 `minecraft:always_pass`），
+日志为相邻 remote-session 的 `handoff/logs/s3-b-rt-basic-final3.log`。
+本仓 `:fabric:runGametest` 10/10（本仓 9 例加 `always_pass`），`-PcombatFullAssembly :fabric:runClientTest`
+结果为 `success=true commands=true captures=10`，日志为 `handoff/logs/s3-anim-combat-runtime-gametest.log`、
+`s3-anim-combat-runtime-clienttest.log`。1.20.1 时期为 4 项 JUnit、11 项 GameTest（`integration-final-gametest.log`）。
 
 Windows 烟测用 `powershell.exe` 冷启动实例根 `Start-Meridian.ps1`，到主菜单后核对 `logs/latest.log`
 没有 Mixin 失败或模组加载错误，截图后正常退出，不进入存档。
