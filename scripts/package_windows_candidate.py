@@ -1,37 +1,49 @@
-"""从相邻当前工作区构建 Windows Native 候选；只在新目录内写入文件。"""
+"""从相邻当前工作区构建 26.2 发布 JAR，装进 Windows 实例的 mods 目录。"""
 
 import argparse
 from datetime import datetime, timezone
 import hashlib
+import io
 import json
 from pathlib import Path
-import shlex
+import re
 import shutil
 import subprocess
+import tomllib
 import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
 CODE = ROOT.parent
-INSTANCE = Path("/mnt/d/Minecraft/Meridian-Animation-Integrated-20261021")
+# 实例由 remote-session 的 handoff/s4-work/setup_instance.py 搭建：标准 Fabric 目录与 Start-Meridian.ps1。
+INSTANCE = Path("/mnt/d/Minecraft/Meridian-26.2-20261101")
+START_SCRIPT = "Start-Meridian.ps1"
 # 仓库、模块与产物名只认 Framework 的统一装配清单，开发运行的 full-assembly.gradle 读同一份。
 MANIFEST = json.loads((CODE / "Kizuna-Meridian-Mod-Framework/scripts/assembly.json").read_text(encoding="utf-8"))
 REPOSITORIES = {repository["directory"]: repository for repository in MANIFEST["repositories"]}
-# 清单顺序满足文件形式的跨仓编译依赖；没有 candidate 的模块（如只在专用服务端加载的 JAR）不进客户端候选。
-# 构建直接读取工作区，包含未提交源文件。
+# 第三方模组版本只认 Framework 的版本目录，与各仓编译用的是同一份。
+CATALOG = tomllib.loads((CODE / "Kizuna-Meridian-Mod-Framework/scripts/libs.versions.toml").read_text(encoding="utf-8"))
+THIRD_PARTY = ("fabric-api", "owo")
+GRADLE_FILES = Path.home() / ".gradle/caches/modules-2/files-2.1"
+# 模组与数据模组各自一个安装 JAR；库由所属模组的安装 JAR 嵌套，没有 candidate 的模块不进客户端。
+INSTALLED_KINDS = ("mod", "data-mod")
 PROJECTS = {
-    repository["directory"]: [(module["path"], module["candidate"])
-                              for module in repository["modules"] if "candidate" in module]
+    repository["directory"]: [module["path"] for module in repository["modules"]
+                              if module.get("candidate") in INSTALLED_KINDS]
     for repository in MANIFEST["repositories"]
 }
-WORKSPACE_MARKERS = ("kizuna-", "meridian-") + tuple(repository["project"] for repository in MANIFEST["repositories"])
+WORKSPACE_MARKERS = ("kizuna-", "meridian-") + tuple(repository["project"] + "-"
+                                                    for repository in MANIFEST["repositories"])
 FORBIDDEN = "combat_trial"
 # build/libs 里与发布 JAR 并列的带分类后缀产物：源码、下游测试夹具与旧开发 JAR 都不能进候选。
 EXCLUDED_CLASSIFIERS = ("-sources.jar", "-test-fixtures.jar", "-dev.jar")
+# Loader 自己提供的依赖 ID；其余依赖必须由 mods 目录里的模组或其嵌套 JAR 提供。
+BUILTIN_IDS = {"java", "minecraft", "fabricloader"}
+CLASS_REFERENCE = re.compile(rb"dev/kizuna/[A-Za-z0-9_/$]+")
 
 
 def digest(path):
-    # 全字节哈希同时用于源产物、复制结果和保留的外部运行库。
+    # 全字节哈希同时用于源产物、复制结果和保护文件。
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -71,153 +83,202 @@ def artifact(repository, module):
     return CODE / repository / module / "build" / "libs" / f"{basename}-{version}.jar"
 
 
-def mod_id(path):
-    # 只读取顶层身份，嵌套第三方库由 Fabric 的依赖解析处理。
-    with zipfile.ZipFile(path) as archive:
-        if "fabric.mod.json" not in archive.namelist():
-            return None
-        return json.loads(archive.read("fabric.mod.json"))["id"]
+def third_party(alias):
+    # 版本目录给出坐标与版本，JAR 取 Gradle 模块缓存里各仓编译用的那一份；缓存目录名就是文件的 SHA-1。
+    library = CATALOG["libraries"][alias]
+    group, name = library["module"].split(":")
+    version = CATALOG["versions"][library["version"]["ref"]]
+    matches = sorted((GRADLE_FILES / group / name / version).glob(f"*/{name}-{version}.jar"))
+    if len(matches) != 1:
+        raise RuntimeError(f"Gradle 缓存里 {name} {version} 的 JAR 不是恰好一个：{matches}")
+    path = matches[0]
+    if hashlib.sha1(path.read_bytes()).hexdigest() != path.parent.name:
+        raise RuntimeError(f"Gradle 缓存 JAR 的 SHA-1 与目录名不符：{path}")
+    return {"name": name, "version": version, "source": path}
 
 
 def windows(path):
-    # WSL 盘符挂载映射到 Windows Java 可读取的正斜线绝对路径。
-    parts = path.resolve().parts
-    if len(parts) < 4 or parts[1] != "mnt" or len(parts[2]) != 1:
-        raise ValueError(f"候选需要 Windows 盘符路径：{path}")
-    return parts[2].upper() + ":/" + "/".join(parts[3:])
+    # 指南写给 Windows 用户，路径交给 wslpath 换成 Windows 写法；演练用的 Linux 目录也能换算。
+    result = subprocess.run(["wslpath", "-w", str(path)], check=True, capture_output=True, text=True)
+    return result.stdout.strip()
 
 
-def local(path):
-    # 只接受实例中已存在的 Windows 绝对路径，不猜测相对类路径。
-    if len(path) < 3 or path[1:3] != ":/":
-        raise ValueError(f"不支持的类路径：{path}")
-    return Path("/mnt") / path[0].lower() / path[3:]
+def running(instance):
+    # 换 mods 前确认本实例没有客户端在跑：Start-Meridian.ps1 以实例根的 meridian.args 启动 Java。
+    pattern = re.escape(instance.name) + r"[\\/]meridian[.]args"
+    command = ("@(Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^javaw?[.]exe$' -and "
+               f"$_.CommandLine -match '{pattern}' }}).Count")
+    result = subprocess.run(["powershell.exe", "-NoProfile", "-Command", command],
+                            check=True, capture_output=True, text=True, timeout=120)
+    return int(result.stdout.strip()) > 0
 
 
-def preserved_files(instance, live_instance=False):
-    # 启动文件始终按字节保护；运行中存档由游戏持锁并持续保存，不能读取或要求其冻结。
+def replaceable(path):
+    # 工作区与两个第三方模组的旧 JAR 都会被本次安装替换；其他 JAR 留在 mods 目录并参与检查。
+    name = path.name.lower()
+    markers = WORKSPACE_MARKERS + tuple(CATALOG["libraries"][alias]["module"].split(":")[1] + "-"
+                                        for alias in THIRD_PARTY)
+    return name.startswith(markers)
+
+
+def preserved_files(instance):
+    # 启动参数、启动脚本与存档按字节保护：本脚本只动 mods、候选记录目录与实例根指南。
     paths = set(instance.glob("*.args")) | set(instance.glob("*.ps1"))
-    paths.add(instance / "COMBAT-TRIAL.md")
-    if not live_instance:
-        for game in ("play", "combat"):
-            paths.update(path for path in (instance / game / "saves").rglob("*") if path.is_file())
-    return {str(path): digest(path) for path in sorted(paths) if path.is_file()}
+    paths.update(path for path in (instance / "saves").rglob("*") if path.is_file())
+    return {str(path.relative_to(instance)): digest(path) for path in sorted(paths) if path.is_file()}
 
 
-def inherited_classpath(arguments, sources):
-    # 按身份和库文件名移除旧工作区模块，外部 Minecraft/Fabric/Windows 运行库逐字保留。
-    index = arguments.index("-classpath") + 1
-    identities = {identity for source in sources if (identity := mod_id(source)) is not None}
-    retained = []
-    removed = []
-    for entry in arguments[index].split(";"):
-        path = local(entry)
-        identity = mod_id(path)
-        workspace_library = any(marker in path.name.lower() for marker in WORKSPACE_MARKERS)
-        if identity in identities or workspace_library or FORBIDDEN in (identity or ""):
-            removed.append(entry)
-        else:
-            if identity and (identity.startswith("meridian_") or identity.startswith("kizuna_")):
-                raise RuntimeError(f"未识别的工作区模组，拒绝继承：{entry}")
-            retained.append({"path": entry, "source": "inherited-external-play.args", "sha256": digest(path)})
-    return index, retained, removed
+def read_archive(name, archive, found):
+    # 递归读取 JAR 与其嵌套 JAR：登记模组 ID、依赖、类文件与类文件里对工作区类的引用。
+    entries = archive.namelist()
+    found["classes"].update(entry[:-len(".class")] for entry in entries if entry.endswith(".class"))
+    for entry in entries:
+        if entry.endswith(".class"):
+            found["references"].update(match.decode() for match in CLASS_REFERENCE.findall(archive.read(entry)))
+    if "fabric.mod.json" not in entries:
+        return None
+    mod = json.loads(archive.read("fabric.mod.json"))
+    for identity in [mod["id"], *mod.get("provides", [])]:
+        found["ids"].setdefault(identity, name)
+    for dependency in mod.get("depends", {}):
+        found["depends"].append((name, mod["id"], dependency))
+    if "gametest" in " ".join(mod.get("entrypoints", {})):
+        raise RuntimeError(f"安装 JAR 带 GameTest 入口：{name} 的 {mod['id']}")
+    for nested in mod.get("jars", []):
+        with zipfile.ZipFile(io.BytesIO(archive.read(nested["file"]))) as inner:
+            read_archive(name + "!" + nested["file"], inner, found)
+    return mod["id"]
 
 
-def verify_classpath(rows):
-    # 候选静态检查只证明装配完整，不代替 Windows 启动与 Mixin 应用烟测。
-    identities = {}
-    for row in rows:
-        path = local(row["path"])
-        if digest(path) != row["sha256"]:
-            raise RuntimeError(f"候选校验和不符：{path}")
-        identity = mod_id(path)
-        if FORBIDDEN in (identity or "") or "combat-trial-catalog" in path.name.lower():
-            raise RuntimeError(f"候选包含已取消的试玩目录：{path}")
+def verify_mods(paths):
+    # 静态检查只证明 mods 目录装配完整，不代替 Windows 启动与 Mixin 应用烟测。
+    found = {"ids": {}, "depends": [], "classes": set(), "references": set()}
+    top_level = {}
+    for path in paths:
         if path.name.endswith(EXCLUDED_CLASSIFIERS):
-            raise RuntimeError(f"候选包含源码、测试夹具或开发 JAR：{path}")
-        if identity:
-            if identity in identities:
-                raise RuntimeError(f"重复顶层模组 ID：{identity}")
-            identities[identity] = row["path"]
-    return identities
+            raise RuntimeError(f"mods 目录包含源码、测试夹具或开发 JAR：{path.name}")
+        with zipfile.ZipFile(path) as archive:
+            identity = read_archive(path.name, archive, found)
+        if identity is None:
+            raise RuntimeError(f"mods 目录里的 JAR 不是 Fabric 模组：{path.name}")
+        if FORBIDDEN in identity or "combat-trial-catalog" in path.name.lower():
+            raise RuntimeError(f"候选包含已取消的试玩目录：{path.name}")
+        if identity in top_level:
+            raise RuntimeError(f"重复顶层模组 ID：{identity}（{top_level[identity]}、{path.name}）")
+        top_level[identity] = path.name
+    missing = sorted({f"{owner} 的 {mod} 依赖 {dependency}" for owner, mod, dependency in found["depends"]
+                      if dependency not in found["ids"] and dependency not in BUILTIN_IDS})
+    if missing:
+        raise RuntimeError("依赖没有任何模组提供：\n" + "\n".join(missing))
+    packages = {name.rsplit("/", 1)[0] for name in found["classes"]}
+    unresolved = sorted(reference for reference in found["references"]
+                        if reference not in found["classes"]
+                        and not any(package == reference or package.startswith(reference + "/")
+                                    for package in packages))
+    if unresolved:
+        raise RuntimeError("工作区类引用在 mods 目录里找不到：\n" + "\n".join(unresolved))
+    return top_level
 
 
-def write_candidate(destination, arguments, index, rows, removed, states, commands, protected, live_instance=False):
-    # 所有写入仅落在刚创建的候选目录；现用参数和启动脚本保持原字节。
-    classpath = ";".join(row["path"] for row in rows)
-    arguments[index] = classpath
-    remap = "-Dfabric.remapClasspathFile=" + windows(destination / "remapClasspath.txt")
-    arguments = [remap if item.startswith("-Dfabric.remapClasspathFile=") else item for item in arguments]
-    if not any(item.startswith("-Dfabric.remapClasspathFile=") for item in arguments):
-        raise RuntimeError("原实例没有开发重映射类路径参数")
-    if "-Dfabric.development=true" not in arguments:
-        raise RuntimeError("原实例不是 named 开发装配")
-    # 旧开发入口的 smoke 标记会跳过库存 UI 偏好读取，正式候选使用正常用户配置。
-    arguments = [value for value in arguments if not value.startswith("-Dkiui.smoke=")]
-    arguments[arguments.index("--gameDir") + 1] = windows(destination.parent.parent / "combat")
-    arguments[arguments.index("--version") + 1] = "Meridian-Combat-Current-Candidate"
-    (destination / "remapClasspath.txt").write_text(classpath, encoding="utf-8")
-    (destination / "combat.args").write_text(
-        "\n".join('"' + value + '"' for value in arguments) + "\n", encoding="utf-8")
-    identities = verify_classpath(rows)
-    manifest = {"workspaces": states, "commands": commands, "classpath": rows,
-                "removed_workspace_entries": removed, "top_level_mods": identities,
-                "protected": protected, "windows_launch_tested": False, "live_instance": live_instance}
-    (destination / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    # 试玩命令与已知问题只维护 Wiki 一份，候选填入自己的确定路径。
+def plan(instance, states):
+    # 先算出安装后的完整 mods 目录并检查，任何一项不通过都不改实例。
+    rows = []
+    for repository, modules in PROJECTS.items():
+        for module in modules:
+            source = artifact(repository, module)
+            rows.append({"file": source.name, "repository": repository, "module": module,
+                         "head": states[repository]["head"], "source": str(source), "sha256": digest(source)})
+    for alias in THIRD_PARTY:
+        library = third_party(alias)
+        rows.append({"file": library["source"].name, "catalog": alias, "version": library["version"],
+                     "source": str(library["source"]), "sha256": digest(library["source"])})
+    names = [row["file"] for row in rows]
+    if len(set(names)) != len(names):
+        raise RuntimeError("安装 JAR 文件名重复")
+    current = sorted((instance / "mods").glob("*.jar"))
+    replaced = [path.name for path in current if replaceable(path)]
+    kept = [path for path in current if not replaceable(path)]
+    top_level = verify_mods([Path(row["source"]) for row in rows] + kept)
+    return rows, replaced, [path.name for path in kept], top_level
+
+
+def install(instance, record, rows, replaced):
+    # 旧 JAR 挪进本次记录目录可回滚，再复制新 JAR 并逐个核对哈希。
+    mods = instance / "mods"
+    (record / "replaced").mkdir()
+    for name in replaced:
+        shutil.move(mods / name, record / "replaced" / name)
+    for row in rows:
+        target = mods / row["file"]
+        shutil.copy2(row["source"], target)
+        if digest(target) != row["sha256"]:
+            raise RuntimeError(f"复制后的 JAR 校验和不符：{target}")
+
+
+def write_guide(instance, record):
+    # 试玩命令与已知问题只维护 Wiki 一份，实例根指南填入本实例的启动脚本与记录目录。
     guide = (ROOT / "docs/wiki/Windows-Combat.md").read_text(encoding="utf-8")
-    guide = guide.replace("__CANDIDATE_ARGS__", windows(destination / "combat.args"))
-    guide = guide.replace("__CANDIDATE_DIRECTORY__", windows(destination))
-    (destination / "COMBAT-TRIAL.md").write_text(guide, encoding="utf-8")
-    return identities
+    guide = guide.replace("__START_SCRIPT__", windows(instance / START_SCRIPT))
+    guide = guide.replace("__CANDIDATE_DIRECTORY__", windows(record))
+    (instance / "COMBAT-TRIAL.md").write_text(guide, encoding="utf-8")
+
+
+def build(record, states):
+    # 按清单顺序逐仓构建（下游按文件依赖上游产物），任一失败即停止并保留日志；构建期间源码不得变化。
+    commands = []
+    (record / "build-logs").mkdir()
+    for repository in states:
+        command = ["bash", "gradlew", "build", "--no-daemon", "--console=plain"]
+        commands.append({"repository": repository, "command": command})
+        print("构建：" + repository, flush=True)
+        with (record / "build-logs" / (repository + ".log")).open("w", encoding="utf-8") as output:
+            subprocess.run(command, cwd=CODE / repository, stdout=output, stderr=subprocess.STDOUT, check=True)
+    for repository, before in states.items():
+        if workspace_state(CODE / repository) != before:
+            raise RuntimeError(f"构建期间源码发生变化，需重新打包：{repository}")
+    return commands
 
 
 def main():
-    # 每次创建新目录，失败也保留日志，不覆盖任何旧候选或现用文件。
+    # 每次创建新的记录目录；演练只用现有产物算安装计划并检查，不构建也不写实例。
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--instance", type=Path, default=INSTANCE)
-    parser.add_argument("--name", default="combat-current-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
-    parser.add_argument("--live-instance", action="store_true",
-                        help="保留运行中的客户端；只校验启动文件，不读取或写入其正在使用的存档")
+    parser.add_argument("--name", default="candidate-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
+    parser.add_argument("--dry-run", action="store_true", help="不构建、不写实例，只用现有产物检查并打印安装计划")
     args = parser.parse_args()
     if Path(args.name).name != args.name or args.name in (".", ".."):
         parser.error("候选名必须为单层目录名")
     instance = args.instance.resolve()
-    destination = instance / "libraries" / args.name
-    protected = preserved_files(instance, args.live_instance)
-    states = {name: workspace_state(CODE / name) for name in PROJECTS}
-    arguments = shlex.split((instance / "play.args").read_text(encoding="utf-8"))
-    destination.mkdir(parents=True, exist_ok=False)
-    (destination / "build-logs").mkdir()
+    if not (instance / START_SCRIPT).is_file() or not (instance / "mods").is_dir():
+        parser.error(f"实例缺少 {START_SCRIPT} 或 mods 目录：{instance}")
+    if running(instance):
+        raise RuntimeError("实例的客户端正在运行，请先正常退出游戏")
+    record = instance / "candidates" / args.name
+    protected = preserved_files(instance)
+    states = {repository: workspace_state(CODE / repository) for repository in REPOSITORIES}
     commands = []
-    for repository in PROJECTS:
-        command = ["bash", "gradlew", "build", "--console=plain"]
-        commands.append({"repository": repository, "command": command})
-        print("构建：" + repository, flush=True)
-        with (destination / "build-logs" / (repository + ".log")).open("w", encoding="utf-8") as output:
-            subprocess.run(command, cwd=CODE / repository, stdout=output, stderr=subprocess.STDOUT, check=True)
-    sources = [artifact(repository, module)
-               for repository, modules in PROJECTS.items() for module, _ in modules]
-    index, rows, removed = inherited_classpath(arguments, sources)
-    for repository, modules in PROJECTS.items():
-        for module, _ in modules:
-            source = artifact(repository, module)
-            target = destination / source.name
-            shutil.copy2(source, target)
-            rows.append({"path": windows(target), "source": str(source), "repository": repository,
-                         "module": module, "sha256": digest(source)})
-    for repository, before in states.items():
-        if workspace_state(CODE / repository) != before:
-            raise RuntimeError(f"构建期间源码发生变化，需重新打包：{repository}")
-    if preserved_files(instance, args.live_instance) != protected:
-        raise RuntimeError("原实例保护文件发生变化，拒绝标记候选就绪")
-    identities = write_candidate(destination, arguments, index, rows, removed, states, commands, protected,
-                                 args.live_instance)
-    print(json.dumps({"candidate": str(destination), "workspaces": len(states),
-                      "workspace_jars": len(sources), "classpath_entries": len(rows),
-                      "top_level_mods": len(identities), "protected_files": len(protected),
-                      "windows_launch_tested": False}, ensure_ascii=False, indent=2))
+    if not args.dry_run:
+        record.mkdir(parents=True, exist_ok=False)
+        commands = build(record, states)
+    rows, replaced, kept, top_level = plan(instance, states)
+    summary = {"instance": str(instance), "dry_run": args.dry_run, "workspaces": len(states),
+               "installed": [row["file"] for row in rows], "replaced": replaced, "kept": kept,
+               "top_level_mods": len(top_level)}
+    if args.dry_run:
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return
+    if running(instance):
+        raise RuntimeError("构建期间实例的客户端启动了，拒绝替换 mods")
+    install(instance, record, rows, replaced)
+    if preserved_files(instance) != protected:
+        raise RuntimeError("实例保护文件发生变化，拒绝标记候选就绪")
+    manifest = {"workspaces": states, "commands": commands, "installed": rows, "replaced": replaced,
+                "kept": kept, "top_level_mods": top_level, "protected": protected,
+                "start_script": windows(instance / START_SCRIPT), "windows_launch_tested": False}
+    (record / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_guide(instance, record)
+    summary["candidate"] = str(record)
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

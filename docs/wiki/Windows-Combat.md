@@ -1,27 +1,26 @@
 # Windows 战斗整套试玩指南
 
-实例：`D:\Minecraft\Meridian-Animation-Integrated-20261021`。
-候选由 25 个当前工作区构建，包含未提交修改、PA Mobs-Addon、bs3d 三个附属、Burden、Humanoid Dummy、Humanoid Taunts、正式基础功法、破门斩与调试库 `meridian_debug`，已移除试玩功法目录。
-来源提交、源码摘要、JAR 哈希及各仓构建日志见候选的 `manifest.json`、`build-logs/`。
-本页中的候选路径占位符由打包脚本替换，实例根指南指向具体已验证候选。
+实例：`D:\Minecraft\Meridian-26.2-20261101`（Minecraft 26.2、Fabric Loader 0.20.1，标准 `mods/` 目录）。
+`mods/` 装的是 25 个当前工作区构建的 26 个发布 JAR 与 Fabric API、owo，包含未提交修改、PA Mobs-Addon、
+bs3d 三个附属、Burden、Humanoid Dummy、Humanoid Taunts、正式基础功法、破门斩与调试库 `meridian_debug`，
+已移除试玩功法目录。
+来源提交、源码摘要、JAR 哈希及各仓构建日志见本次候选的 `manifest.json`、`build-logs/`。
+本页由打包脚本写到实例根 `COMBAT-TRIAL.md`，路径占位符换成本实例的实际路径。
 
-## 启动与切换
+## 启动与回滚
 
 先正常退出当前游戏；不要强行结束已有客户端，也不要同时使用同一游戏目录。
-在 PowerShell 执行（只切换战斗参数，不改 `play.args`、原脚本或任何存档）：
+在 PowerShell 执行：
 
 ```powershell
-Set-Location "D:\Minecraft\Meridian-Animation-Integrated-20261021"
-$backup = ".\combat.args.before-final-" + (Get-Date -Format "yyyyMMdd-HHmmss")
-Copy-Item -LiteralPath ".\combat.args" -Destination $backup
-Copy-Item -LiteralPath "__CANDIDATE_ARGS__" -Destination ".\combat.args"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "__START_SCRIPT__"
 ```
 
-此后直接运行实例根 `Start-combat.ps1`；脚本检查重复实例，记录 `combat.pid`。
-候选自己的 `remapClasspath.txt` 保持原处，无需复制到实例根。
-游戏目录为 `combat/`，世界在 `combat/saves/`。
-回滚时正常退出，再把上述备份复制回 `combat.args`。
+启动脚本检查重复实例，以实例根 `meridian.args` 启动，PID 写 `meridian.pid`。
+Java 25 用官方启动器的 `java-runtime-epsilon`；脚本报找不到时，先在官方启动器启动一次 26.2 原版让它下载。
+游戏目录就是实例根，世界在 `saves/`，模组在 `mods/`。
+本次替换下来的旧 JAR 在 `__CANDIDATE_DIRECTORY__\replaced\`。回滚时正常退出，
+移走 `mods/` 里本次装入的 JAR（`manifest.json` 的 `installed` 列出），再把 `replaced/` 里的旧 JAR 移回。
 
 ## 创建试玩世界、读卷与资源准备
 
@@ -34,7 +33,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 /meridian opening complete all
 /meridian qi fill
 /gamerule meridian_human:technique_player_break_blocks true
-/gamerule mobGriefing true
+/gamerule mob_griefing true
 ```
 
 创造物品栏找「功法」页（也可搜索「基础功法」「破门斩」），取得：
@@ -125,7 +124,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 /kill <生成反馈中的UUID>
 ```
 
-确认真炁后保持普通难度、`mobGriefing true`，切换 `/gamemode survival` 让它以玩家为目标。
+确认真炁后保持普通难度、`mob_griefing true`，切换 `/gamemode survival` 让它以玩家为目标。
 它会举斧起手并自行选择破门斩；让它在视线通畅时起手劈门式，再在前方两格内放木门，可观察木门被劈开。
 关闭木门挡住视线时 AI 可能不决策；并非每次攻击都选择劈门。
 测试后切回创造并按 UUID 清理测试实体即可。
@@ -224,7 +223,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 /setblock ~ ~ ~2 minecraft:oak_door[facing=north,half=lower]
 /setblock ~ ~1 ~2 minecraft:oak_door[facing=north,half=upper]
 /meridian humanoid spawn vindicator true_qi ~ ~ ~5
-/gamerule mobGriefing true
+/gamerule mob_griefing true
 ```
 
 木门命令沿世界 +Z 方向放置，转向门再施放 4。卫道士的出招由距离、资源、受击等情境评分选择，
@@ -285,7 +284,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 
 能看到抢在对方起手结束前打断、来袭时侧闪或硬抗、开打前蓄力，以及虚脱后的拉扯。
 
-学卷和行为门槛在 `combat/config/meridian-humanoid-brain.toml`；`log_decisions = true` 时每次决策写一行日志
+学卷和行为门槛在 `config/meridian-humanoid-brain.toml`；`log_decisions = true` 时每次决策写一行日志
 （动作与理由）。退出游戏后再编辑。测试后按生成反馈中的 UUID 清理实体。
 
 ## 验证、日志与已知问题
@@ -294,9 +293,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\Start-combat.ps1"
 木门/耐久、叩门实伤，真炁卫道士由类人大脑对在线玩家施放和劈门，以及村民被玩家打后撤退或还手。
 详细伤害公式、权限和时序边界仍由各仓 GameTest 覆盖。
 
-Windows 烟测仅到主菜单：探针确认真实 TitleScreen 与资源加载完成，核对模组清单和 Mixin 错误，
-随后探针自动退出本次客户端；不截图、OCR、不进入世界。
-候选 `windows-smoke.json` 记录实际结果；打包时清单中的 false 不代表后续烟测结论。
+Windows 烟测仅到主菜单：冷启动 `Start-Meridian.ps1`，到主菜单后核对 `logs/latest.log` 没有 Mixin 失败
+或模组加载错误，截图后正常退出；不进入世界。打包时清单中的 `windows_launch_tested: false` 不代表后续烟测结论。
 按键、镜头、阅读排版和 HUD 的实际游玩体验仍需用户进世界观察。
 
 - 叩门、破门、撞门主副手六段专属动画已接入玩家与卫道士，打击时刻已与目录对齐。
@@ -305,6 +303,6 @@ Windows 烟测仅到主菜单：探针确认真实 TitleScreen 与资源加载�
   交易借用使用物品，受击借用单手格挡受击。未新制动作；主副手、盔甲、头饰与头戴旗帜继续可见。
 - 离线启动参数可能出现认证 HTTP 401、Realms 不可用及可选类/音效/shader 警告；不代表正版多人登录已验收。
 - 只验证本整套工作区装配，未验收任意第三方模组组合。
-- 正式运行日志：`combat/logs/latest.log`、`debug.log`；启动日志：实例根 `combat-stdout.log`、`combat-stderr.log`。
-- 候选烟测证据与实际日志路径见 `__CANDIDATE_DIRECTORY__/windows-smoke.json`；启动输出、主菜单标记与 PID 同在候选内。
-- 配置：`combat/config/kizuna-meridian-combat.json`；退出游戏后再编辑镜头参数。
+- 正式运行日志：`logs/latest.log`、`debug.log`；启动输出：实例根 `meridian-stdout.log`、`meridian-stderr.log`。
+- 本次装入的 JAR、来源提交与哈希见 `__CANDIDATE_DIRECTORY__\manifest.json`。
+- 配置：`config/kizuna-meridian-combat.json`；退出游戏后再编辑镜头参数。
