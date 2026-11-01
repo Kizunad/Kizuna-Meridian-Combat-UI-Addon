@@ -18,7 +18,8 @@ python3 "scripts/package_windows_candidate.py"
 
 默认实例是 `/mnt/d/Minecraft/Meridian-26.2-20261101`：标准 Fabric 目录加 `Start-Meridian.ps1`，
 由 remote-session 的 `handoff/s4-work/setup_instance.py` 搭建；可用 `--instance` 指定其他实例。
-`--dry-run` 不构建、不写实例，只用各仓现有的 `build/libs` 产物算出安装计划并做下面的全部检查。
+`--dry-run` 不构建、不写实例，只用各仓现有的 `build/libs` 产物算出安装计划并做下面的全部检查，
+同时列出正式运行会删掉哪些旧记录目录（`pruned`）。
 正式运行每次在实例的 `candidates/candidate-时间戳/` 下建新目录；`--name` 可指定单层目录名，已有目录会拒绝覆盖。
 按清单顺序依次在 25 个相邻仓运行 `bash gradlew build --no-daemon --console=plain`，任一失败即停止并保留候选内的构建日志。
 这会使用未提交源文件，不使用隔离提交快照。
@@ -29,6 +30,9 @@ python3 "scripts/package_windows_candidate.py"
 `mods/` 里以 `kizuna-`、`meridian-`、清单项目名、`fabric-api-`、`owo-lib-` 开头的旧 JAR 先挪进候选的 `replaced/`，
 再复制新 JAR 并核对 SHA-256；其他 JAR 保留并参与检查。实例的客户端在运行时拒绝替换。
 候选的 `manifest.json`、`build-logs/` 与 `replaced/` 都在新目录内，试玩指南写到实例根 `COMBAT-TRIAL.md`。
+安装核对通过后清理旧记录：`candidate-时间戳` 形式的记录目录按名字（即 UTC 时间）排序，连同本次只留最近
+`--keep` 份（默认 3），更早的整个目录连同其 `replaced/` 删除，`manifest.json` 的 `pruned` 列出删掉的目录名。
+`--name` 起的其他名字不计入份数，也不会被删；本次记录始终保留。
 
 清单记录每仓 HEAD、未提交状态、Git 可见源码文件哈希、构建命令、每个 JAR 的来源和 SHA-256。
 写入前先检查装好后的整个 `mods/`：顶层模组 ID 不重复，每个 `depends` 都有模组（含嵌套 JAR 与 `provides`）提供，

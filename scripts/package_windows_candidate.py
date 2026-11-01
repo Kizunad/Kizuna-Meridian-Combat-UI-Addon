@@ -40,6 +40,8 @@ EXCLUDED_CLASSIFIERS = ("-sources.jar", "-test-fixtures.jar", "-dev.jar")
 # Loader 自己提供的依赖 ID；其余依赖必须由 mods 目录里的模组或其嵌套 JAR 提供。
 BUILTIN_IDS = {"java", "minecraft", "fabricloader"}
 CLASS_REFERENCE = re.compile(rb"dev/kizuna/[A-Za-z0-9_/$]+")
+# 默认记录目录名带 UTC 时间戳，按名字排序即时间序；--name 起的其他名字不参与清理。
+RECORD_NAME = re.compile(r"candidate-\d{8}-\d{6}")
 
 
 def digest(path):
@@ -215,6 +217,14 @@ def install(instance, record, rows, replaced):
             raise RuntimeError(f"复制后的 JAR 校验和不符：{target}")
 
 
+def stale_records(instance, name, keep):
+    # 连同本次记录在内只留最近 keep 份默认命名的记录目录，本次记录无论名字如何都不删。
+    names = {path.name for path in (instance / "candidates").glob("candidate-*") if path.is_dir()}
+    names.add(name)
+    timed = sorted(entry for entry in names if RECORD_NAME.fullmatch(entry))
+    return [entry for entry in timed[:-keep] if entry != name]
+
+
 def write_guide(instance, record):
     # 试玩命令与已知问题只维护 Wiki 一份，实例根指南填入本实例的启动脚本与记录目录。
     guide = (ROOT / "docs/wiki/Windows-Combat.md").read_text(encoding="utf-8")
@@ -244,10 +254,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--instance", type=Path, default=INSTANCE)
     parser.add_argument("--name", default="candidate-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S"))
-    parser.add_argument("--dry-run", action="store_true", help="不构建、不写实例，只用现有产物检查并打印安装计划")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="不构建、不写实例，只用现有产物检查并打印安装计划与将删除的旧记录目录")
+    parser.add_argument("--keep", type=int, default=3, help="安装成功后连同本次在内保留的最近记录目录份数")
     args = parser.parse_args()
     if Path(args.name).name != args.name or args.name in (".", ".."):
         parser.error("候选名必须为单层目录名")
+    if args.keep < 1:
+        parser.error("--keep 至少为 1：本次记录目录必须保留")
     instance = args.instance.resolve()
     if not (instance / START_SCRIPT).is_file() or not (instance / "mods").is_dir():
         parser.error(f"实例缺少 {START_SCRIPT} 或 mods 目录：{instance}")
@@ -265,6 +279,7 @@ def main():
                "installed": [row["file"] for row in rows], "replaced": replaced, "kept": kept,
                "top_level_mods": len(top_level)}
     if args.dry_run:
+        summary["pruned"] = stale_records(instance, args.name, args.keep)
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return
     if running(instance):
@@ -272,8 +287,13 @@ def main():
     install(instance, record, rows, replaced)
     if preserved_files(instance) != protected:
         raise RuntimeError("实例保护文件发生变化，拒绝标记候选就绪")
+    # 安装核对通过后才清理旧记录，删除连同其 replaced/ 旧 JAR，回滚只能退到保留下来的几份。
+    pruned = stale_records(instance, args.name, args.keep)
+    for entry in pruned:
+        shutil.rmtree(instance / "candidates" / entry)
+    summary["pruned"] = pruned
     manifest = {"workspaces": states, "commands": commands, "installed": rows, "replaced": replaced,
-                "kept": kept, "top_level_mods": top_level, "protected": protected,
+                "kept": kept, "pruned": pruned, "top_level_mods": top_level, "protected": protected,
                 "start_script": windows(instance / START_SCRIPT), "windows_launch_tested": False}
     (record / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     write_guide(instance, record)

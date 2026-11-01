@@ -21,6 +21,8 @@ Java 25 用实例内的 Temurin 25 JRE（`runtime\temurin-25\`，Adoptium 官方
 游戏目录就是实例根，世界在 `saves/`，模组在 `mods/`。
 本次替换下来的旧 JAR 在 `__CANDIDATE_DIRECTORY__\replaced\`。回滚时正常退出，
 移走 `mods/` 里本次装入的 JAR（`manifest.json` 的 `installed` 列出），再把 `replaced/` 里的旧 JAR 移回。
+`candidates\` 只保留最近几份候选记录（打包默认 3 份），更早的连同其 `replaced\` 已删除，回滚最多退回这几份；
+删掉的目录名记在本次 `manifest.json` 的 `pruned`。
 
 ## 创建试玩世界、读卷与资源准备
 
