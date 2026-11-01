@@ -2,7 +2,7 @@
 
 - 沟通、文档和意图注释使用简体中文；公开标识符使用英文。
 - 遵守 `~/.codex/AGENTS.md` 的 Java 代码形状规则，每个方法与构造器写中文意图注释。
-- `shared/` 只放 Protobuf；`core/` 是 Java 17 纯 Java；`fabric/` 适配 Minecraft 1.20.1。
+- `shared/` 只放 Protobuf；`core/` 是 Java 25 纯 Java；`fabric/` 适配 Minecraft 26.2，用 Mojang 官方名，Loom 1.19.3 不重映射，开发运行与安装共用 `build/libs` 的发布 JAR。
 - 硬依赖功法框架公开接口与 Framework 的 `/meridian` 注册点，不依赖 Human、Inventory UI 或具体功法内容。
 - 槽位只保存在客户端；服务端逐次调用 TechniqueService 校验，不持有槽位。
 - 范围为架势、十槽、槽位指令（服务端节点下发、客户端本地保存）、动作栏和第一人称/越肩两模式，包含十槽图标 HUD；不做动画、连招或预输入。
