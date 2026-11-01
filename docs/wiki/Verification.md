@@ -308,3 +308,10 @@ env -u DISPLAY -u WAYLAND_DISPLAY LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s "-scree
 混入配置为 `required: true`、`defaultRequire: 1`，客户端运行成功即说明 5 个客户端 Mixin 都已注入；
 10 张 HUD 截图与 1.20.1 逐张对比一致（背景场景与动作栏提示淡出时机不同，与 HUD 无关）。
 日志为相邻 remote-session 的 `handoff/logs/s3-anim-combat-runtime-gametest.log`、`s3-anim-combat-runtime-clienttest.log`。
+
+## 客户端截图预置无障碍引导选项（2026-11-02）
+
+`runClientTest` 启动前把 `fabric/build/clienttest/options.txt` 的 `onboardAccessibility` 写成 `false`，文件不存在时新建，
+不再依赖残留文件跳过 26.2 首启无障碍引导页。验证时先把残留文件改回 `true`，再跑
+`-PcombatFullAssembly :fabric:runClientTest`：`success=true commands=true captures=10 error=null`，
+跑完文件为 `false`，`fabric/build/hud-screens/` 的截图为游戏内 HUD 画面。
