@@ -17,7 +17,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "__START_SCRIPT__"
 ```
 
 启动脚本检查重复实例，以实例根 `meridian.args` 启动，PID 写 `meridian.pid`。
-Java 25 用官方启动器的 `java-runtime-epsilon`；脚本报找不到时，先在官方启动器启动一次 26.2 原版让它下载。
+Java 25 用实例内的 Temurin 25 JRE（`runtime\temurin-25\`，Adoptium 官方发布，版本与 SHA-256 记在实例根 `instance-manifest.json`）。
 游戏目录就是实例根，世界在 `saves/`，模组在 `mods/`。
 本次替换下来的旧 JAR 在 `__CANDIDATE_DIRECTORY__\replaced\`。回滚时正常退出，
 移走 `mods/` 里本次装入的 JAR（`manifest.json` 的 `installed` 列出），再把 `replaced/` 里的旧 JAR 移回。
