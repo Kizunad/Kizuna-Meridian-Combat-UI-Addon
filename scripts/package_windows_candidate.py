@@ -26,6 +26,8 @@ PROJECTS = {
 }
 WORKSPACE_MARKERS = ("kizuna-", "meridian-") + tuple(repository["project"] for repository in MANIFEST["repositories"])
 FORBIDDEN = "combat_trial"
+# build/libs 里与发布 JAR 并列的带分类后缀产物：源码、下游测试夹具与旧开发 JAR 都不能进候选。
+EXCLUDED_CLASSIFIERS = ("-sources.jar", "-test-fixtures.jar", "-dev.jar")
 
 
 def digest(path):
@@ -58,17 +60,15 @@ def workspace_state(repository):
     }
 
 
-def artifact(repository, module, kind):
-    # 运行于 named 开发命名空间，所有 Fabric 类使用 remap 前的 dev JAR；文件名前缀与版本取自装配清单。
+def artifact(repository, module):
+    # 26.2 不重映射，安装与开发运行用同一个 build/libs 发布 JAR；按清单的前缀与版本拼出精确文件名，
+    # 同目录的 -sources、-test-fixtures 等带分类后缀的 JAR 不会被选中。
     entry = REPOSITORIES[repository]
     basename = entry["project"]
     if module:
         basename += "-" + module
     version = entry.get("version", MANIFEST["version"])
-    development = kind in ("mod", "named-library")
-    directory = "devlibs" if development else "libs"
-    suffix = "-dev" if development else ""
-    return CODE / repository / module / "build" / directory / f"{basename}-{version}{suffix}.jar"
+    return CODE / repository / module / "build" / "libs" / f"{basename}-{version}.jar"
 
 
 def mod_id(path):
@@ -133,6 +133,8 @@ def verify_classpath(rows):
         identity = mod_id(path)
         if FORBIDDEN in (identity or "") or "combat-trial-catalog" in path.name.lower():
             raise RuntimeError(f"候选包含已取消的试玩目录：{path}")
+        if path.name.endswith(EXCLUDED_CLASSIFIERS):
+            raise RuntimeError(f"候选包含源码、测试夹具或开发 JAR：{path}")
         if identity:
             if identity in identities:
                 raise RuntimeError(f"重复顶层模组 ID：{identity}")
@@ -195,12 +197,12 @@ def main():
         print("构建：" + repository, flush=True)
         with (destination / "build-logs" / (repository + ".log")).open("w", encoding="utf-8") as output:
             subprocess.run(command, cwd=CODE / repository, stdout=output, stderr=subprocess.STDOUT, check=True)
-    sources = [artifact(repository, module, kind)
-               for repository, modules in PROJECTS.items() for module, kind in modules]
+    sources = [artifact(repository, module)
+               for repository, modules in PROJECTS.items() for module, _ in modules]
     index, rows, removed = inherited_classpath(arguments, sources)
     for repository, modules in PROJECTS.items():
-        for module, kind in modules:
-            source = artifact(repository, module, kind)
+        for module, _ in modules:
+            source = artifact(repository, module)
             target = destination / source.name
             shutil.copy2(source, target)
             rows.append({"path": windows(target), "source": str(source), "repository": repository,
