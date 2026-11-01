@@ -21,6 +21,8 @@ git diff --check
 根 `build` 包含文档链接检查；GameTest 独立启动专用服务端。
 发行文件为 `fabric/build/libs/kizuna-meridian-combat-ui-addon-fabric-0.1.1-SNAPSHOT.jar`。
 `-sources.jar` 是源码，不用于安装；26.2 不混淆，不再另出 `fabric/build/devlibs` 开发 JAR。
+发行文件用 `python3 scripts/check_artifact.py <发行 JAR>` 检查：文件名与包内版本精确对应、不带 `-sources`、`-test-fixtures` 等分类后缀；
+硬依赖功法框架；5 个客户端 Mixin 类齐全且配置不带 refmap；`fabric.mod.json` 的 `jars` 与包内 3 个内嵌 JAR（core、shared、protobuf-java）一致；没有测试内容。
 原 `scripts/prepare_dependencies.py` 固定 89e37ec 功法与 e285947 Framework，仅用于首版历史复现，已在构建收拢时删除；
 当前构建按组合构建直接使用功法库与 Framework 源码。历史验证见下文及原交付记录。
 
