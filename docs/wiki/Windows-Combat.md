@@ -274,15 +274,23 @@ Java 25 用实例内的 Temurin 25 JRE（`runtime\temurin-25\`，Adoptium 官方
 
 它先蓄力、放轻步，再跃到你身前一两格起手破门式；双臂虚脱后会背向跃步拉开，恢复后再回来。
 
-**两只卫道士互打。** 生成两只真炁卫道士后用调试命令让它们互相仇恨：
+**两只卫道士互打。** 卫道士、唤魔者、幻术师、掠夺者同属原版 `#minecraft:illager_friends`，
+双方都不在队伍里时互为同伴，互相不受功法伤害：只牵引仇恨会看到双方出招却打不中。
+要互打，先用 `/team` 把两只分进不同队伍，再让它们互相仇恨：
 
 ```text
 /meridian humanoid spawn vindicator true_qi ~ ~ ~4
 /meridian humanoid spawn vindicator true_qi ~ ~ ~10
+/team add vindicator_a
+/team add vindicator_b
+/team join vindicator_a @e[type=minecraft:vindicator,sort=nearest,limit=1]
+/team join vindicator_b @e[type=minecraft:vindicator,sort=furthest,limit=1]
 /meridian humanoid aggro @e[type=minecraft:vindicator,sort=nearest,limit=1] @e[type=minecraft:vindicator,sort=furthest,limit=1] mutual
 ```
 
+改用仇恨牵引器（`meridian_debug:aggro_link`）牵引时，同样要先分队。
 能看到抢在对方起手结束前打断、来袭时侧闪或硬抗、开打前蓄力，以及虚脱后的拉扯。
+试完执行 `/team remove vindicator_a` 和 `/team remove vindicator_b`。
 
 学卷和行为门槛在 `config/meridian-humanoid-brain.toml`；`log_decisions = true` 时每次决策写一行日志
 （动作与理由）。退出游戏后再编辑。测试后按生成反馈中的 UUID 清理实体。
