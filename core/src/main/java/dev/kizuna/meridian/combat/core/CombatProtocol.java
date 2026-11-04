@@ -14,6 +14,7 @@ public final class CombatProtocol {
     public static final int MAX_KNOWN_COUNT = 4096;
     public static final int MAX_SLOT_BYTES = 1024;
     private static final int MAX_NAME_LENGTH = 1024;
+    public static final int MAX_DESCRIPTION_LENGTH = 8192;
     public static final long MAX_COOLDOWN_MILLIS = 86_400_000;
 
     private CombatProtocol() {
@@ -52,10 +53,16 @@ public final class CombatProtocol {
                 String id = entry.getId();
                 CombatIds.validateTechnique(id);
                 CombatHud.texture(entry.getIconId()); // 校验资源路径，非法段会抛出 IllegalArgumentException。
+                if (!entry.getVolumeId().isEmpty()) {
+                    CombatIds.validateTechnique(entry.getVolumeId());
+                }
                 long remaining = entry.getCooldownRemainingMillis();
                 long total = entry.getCooldownTotalMillis();
                 if (!identities.add(id) || entry.getName().length() > MAX_NAME_LENGTH
                         || entry.getUnavailableReason().length() > MAX_NAME_LENGTH
+                        || entry.getDescription().length() > MAX_DESCRIPTION_LENGTH
+                        || entry.getVolumeName().length() > MAX_NAME_LENGTH
+                        || entry.getBookName().length() > MAX_NAME_LENGTH
                         || remaining < 0 || total < remaining || total > MAX_COOLDOWN_MILLIS) {
                     throw new IllegalArgumentException("功法投影的身份、文字或冷却范围无效");
                 }

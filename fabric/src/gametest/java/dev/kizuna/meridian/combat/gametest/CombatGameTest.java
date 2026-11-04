@@ -306,6 +306,7 @@ public final class CombatGameTest {
             var technique = known.getTechniques(0);
             context.assertTrue(technique.getId().equals(CombatTestContent.TECHNIQUE), "已学 ID 错误");
             context.assertTrue(technique.getName().equals("测试轻步"), "已学名称错误");
+            context.assertTrue(technique.getDescription().equals("迈出轻盈的一步。"), "独立简介未同步");
         }
         context.succeed();
     }

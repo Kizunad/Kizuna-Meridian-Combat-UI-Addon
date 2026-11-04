@@ -12,6 +12,7 @@ import dev.kizuna.meridian.combat.core.CombatSlots;
 import dev.kizuna.meridian.combat.fabric.CombatChannels;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotCommand;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
@@ -32,6 +33,9 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 
 /** START_CLIENT_TICK 消费架势内按键，视角控制器接管越肩输入和渲染。 */
 public final class CombatClient implements ClientModInitializer {
@@ -50,11 +54,15 @@ public final class CombatClient implements ClientModInitializer {
     private CombatViewController views;
     private CombatHudRenderer renderer;
     private String pendingWarning = "";
+    private KnownTechniques known = KnownTechniques.getDefaultInstance();
+    private CombatSlotAccess.Connection connection = CombatSlotAccess.Connection.DISCONNECTED;
+    private final Set<Integer> configurationKeys = new HashSet<>();
 
     @Override
     public void onInitializeClient() {
         // 初始化本地状态与独立按键，不更改原版快捷栏键绑定。
         load();
+        CombatSlotAccess.initialize(this);
         stanceKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.meridian_combat.stance",
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_R, KEY_CATEGORY));
         slotTenKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.meridian_combat.slot_ten",
@@ -93,6 +101,7 @@ public final class CombatClient implements ClientModInitializer {
         // 使用集成服务器的实际目录名，避免重命名存档显示名称后换档。
         slots.updateKnown(Map.of());
         hud.clear();
+        known = KnownTechniques.getDefaultInstance();
         String key;
         var server = client.getSingleplayerServer();
         if (server != null) {
@@ -102,13 +111,19 @@ public final class CombatClient implements ClientModInitializer {
             key = CombatIds.serverProfile(client.getCurrentServer().ip);
         }
         profiles.enter(key, Instant.now());
+        connection = CombatSlotAccess.Connection.CONNECTED;
         save(client, "");
+        publishSlots();
     }
 
     private void disconnect() {
         // 清理已学缓存与 HUD 投影，并按断线退出架势；旧连接的包在断线后由原版直接丢弃。
         slots.updateKnown(Map.of());
         hud.clear();
+        known = KnownTechniques.getDefaultInstance();
+        connection = CombatSlotAccess.Connection.DISCONNECTED;
+        configurationKeys.clear();
+        publishSlots();
         CombatInput.State before = input.state();
         input.reconcile(CombatInput.Availability.DISCONNECTED);
         notifyStance(before);
@@ -126,17 +141,20 @@ public final class CombatClient implements ClientModInitializer {
     private void applyKnown(byte[] payload) {
         // 非法列表不发布部分内容，也不继续信任旧缓存。
         try {
-            var known = new LinkedHashMap<String, String>();
+            var names = new LinkedHashMap<String, String>();
             var snapshot = CombatProtocol.decodeKnown(payload);
             snapshot.getTechniquesList()
-                    .forEach(entry -> known.put(entry.getId(), entry.getName()));
-            slots.updateKnown(known);
+                    .forEach(entry -> names.put(entry.getId(), entry.getName()));
+            slots.updateKnown(names);
+            known = snapshot;
             hud.update(snapshot, CombatHudRenderer.nowMillis());
         } catch (IllegalArgumentException failure) {
             slots.updateKnown(Map.of());
+            known = KnownTechniques.getDefaultInstance();
             hud.clear();
             LOGGER.warn("无法读取服务器已学功法", failure);
         }
+        publishSlots();
     }
 
     private void registerSlotCommands() {
@@ -161,13 +179,10 @@ public final class CombatClient implements ClientModInitializer {
         try {
             switch (command.getOperation()) {
                 case SLOT_OPERATION_SET -> {
-                    slots.set(number, command.getTechniqueId(), Instant.now());
-                    save(client, "已设置第 " + number + " 槽");
+                    setSlot(number, command.getTechniqueId());
                 }
                 case SLOT_OPERATION_CLEAR -> {
-                    // 清空当前档不修改其他服务器的配置。
-                    profiles.clear(number, Instant.now());
-                    save(client, "已清空第 " + number + " 槽");
+                    clearSlot(number);
                 }
                 case SLOT_OPERATION_LIST -> {
                     slots.lines().forEach(line -> client.player.sendSystemMessage(Component.literal(line)));
@@ -178,14 +193,62 @@ public final class CombatClient implements ClientModInitializer {
         }
     }
 
+    CombatSlotAccess.Result setSlot(int number, String techniqueId) {
+        // 释放拖动或收到命令时重新检查已学状态，客户端展示选择不能授予功法。
+        var client = Minecraft.getInstance();
+        try {
+            requireConnection();
+            slots.set(number, techniqueId, Instant.now());
+            var result = save(client, "已设置第 " + number + " 槽");
+            publishSlots();
+            return result;
+        } catch (IllegalArgumentException | IllegalStateException failure) {
+            actionbar(client, failure.getMessage());
+            return new CombatSlotAccess.Result(CombatSlotAccess.Status.REJECTED, failure.getMessage());
+        }
+    }
+
+    CombatSlotAccess.Result clearSlot(int number) {
+        // 清空只修改当前世界的槽位，与指令共享保存失败反馈。
+        var client = Minecraft.getInstance();
+        try {
+            requireConnection();
+            profiles.clear(number, Instant.now());
+            var result = save(client, "已清空第 " + number + " 槽");
+            publishSlots();
+            return result;
+        } catch (IllegalArgumentException | IllegalStateException failure) {
+            actionbar(client, failure.getMessage());
+            return new CombatSlotAccess.Result(CombatSlotAccess.Status.REJECTED, failure.getMessage());
+        }
+    }
+
+    private void requireConnection() {
+        // 断线后不允许通过残留窗口修改上一世界的配置。
+        if (connection != CombatSlotAccess.Connection.CONNECTED) {
+            throw new IllegalStateException("尚未连接世界，不能配置功法槽位");
+        }
+    }
+
+    private void publishSlots() {
+        // 断线清理展示但保留文件中的分档；HUD 仍直接读取同一个 profiles。
+        var displayed = profiles.slots();
+        if (connection == CombatSlotAccess.Connection.DISCONNECTED) {
+            displayed = Collections.nCopies(CombatIds.SLOT_COUNT, "");
+        }
+        CombatSlotAccess.publish(new CombatSlotAccess.Snapshot(connection, known, displayed));
+    }
+
     private void tick(Minecraft client) {
         // 先处理失效状态，再决定是否取走原版快捷栏按键次数。
+        discardConfigurationClicks(client);
         CombatInput.Availability availability = availability(client);
         CombatInput.State before = input.state();
         input.reconcile(availability);
         CombatInput.Screen screen = CombatInput.Screen.CLOSED;
         if (client.gui.screen() != null) {
             screen = CombatInput.Screen.OPEN;
+            discardSlotClicks(client);
         }
         if (!pendingWarning.isEmpty() && client.player != null) {
             actionbar(client, pendingWarning);
@@ -202,6 +265,50 @@ public final class CombatClient implements ClientModInitializer {
             while (slotTenKey.consumeClick()) {
                 // 独立按键在架势外不产生行为，也不积存到下次进入。
             }
+        }
+    }
+
+    void consumeConfigurationKey(int key) {
+        // 只接纳窗口的主键盘数字键，不改变玩家原有键绑定。
+        if (key >= GLFW.GLFW_KEY_0 && key <= GLFW.GLFW_KEY_9) {
+            configurationKeys.add(key);
+        }
+    }
+
+    private void discardConfigurationClicks(Minecraft client) {
+        // 持续按住配置键关屏时，原版后续 repeat 仍可能排队；直到物理松开前只丢弃同键点击。
+        var iterator = configurationKeys.iterator();
+        while (iterator.hasNext()) {
+            int key = iterator.next();
+            var event = new net.minecraft.client.input.KeyEvent(key, 0, 0);
+            for (var mapping : client.options.keyHotbarSlots) {
+                discardMatchingClicks(mapping, event);
+            }
+            discardMatchingClicks(slotTenKey, event);
+            if (!InputConstants.isKeyDown(client.getWindow(), key)) {
+                iterator.remove();
+            }
+        }
+    }
+
+    private static void discardMatchingClicks(KeyMapping mapping, net.minecraft.client.input.KeyEvent event) {
+        // 按实际按键匹配而不是槽号匹配，兼容玩家自行更改原版快捷栏键位。
+        if (mapping.matches(event)) {
+            while (mapping.consumeClick()) {
+                // 点击仅属于配置窗口，不施放也不切换原版快捷栏。
+            }
+        }
+    }
+
+    private void discardSlotClicks(Minecraft client) {
+        // 配置界面的数字输入不能积存到关屏后的第一帧施放或切换快捷栏。
+        for (var key : client.options.keyHotbarSlots) {
+            while (key.consumeClick()) {
+                // 开屏期间原版快捷栏键没有游戏内语义。
+            }
+        }
+        while (slotTenKey.consumeClick()) {
+            // 第十槽是独立按键，也必须清空排队次数。
         }
     }
 
@@ -304,25 +411,26 @@ public final class CombatClient implements ClientModInitializer {
         }
     }
 
-    private void save(Minecraft client, String successMessage) {
+    private CombatSlotAccess.Result save(Minecraft client, String successMessage) {
         // 保存结果与命令成功合并提示，避免动作栏后一次消息覆盖写入故障。
         boolean hasSuccessMessage = !successMessage.isEmpty();
         if (!file.writable()) {
-            if (hasSuccessMessage) {
-                actionbar(client, successMessage + "（原文件已保护，仅当前会话生效）");
-            }
-            return;
+            String message = successMessage + "（原文件已保护，仅当前会话生效）";
+            actionbar(client, message);
+            return new CombatSlotAccess.Result(CombatSlotAccess.Status.SESSION_ONLY, message);
         }
         try {
             file.save(profiles);
         } catch (IOException failure) {
             LOGGER.warn("战斗配置保存失败", failure);
-            actionbar(client, successMessage + "；战斗配置保存失败，本次设置仅在当前会话生效");
-            return;
+            String message = successMessage + "；战斗配置保存失败，本次设置仅在当前会话生效";
+            actionbar(client, message);
+            return new CombatSlotAccess.Result(CombatSlotAccess.Status.SESSION_ONLY, message);
         }
         if (hasSuccessMessage) {
             actionbar(client, successMessage);
         }
+        return new CombatSlotAccess.Result(CombatSlotAccess.Status.SAVED, successMessage);
     }
 
     private static void actionbar(Minecraft client, String message) {

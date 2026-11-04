@@ -80,7 +80,8 @@ final class CombatTestContent {
                 .setInterruptibleByDamage(true /* interruptibleByDamage */)
                 .build();
         Presentation presentation = Presentation.newBuilder()
-                .setDescription("测试轻步")
+                .setDisplayName("测试轻步")
+                .setDescription("迈出轻盈的一步。")
                 .setIconId("combat_test:step")
                 .build();
         return TechniqueDefinition.newBuilder()
