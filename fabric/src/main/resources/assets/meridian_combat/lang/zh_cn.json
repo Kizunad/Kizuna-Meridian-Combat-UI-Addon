@@ -3,6 +3,8 @@
   "key.meridian_combat.stance": "战斗架势",
   "key.meridian_combat.slot_ten": "战斗架势第 10 槽",
   "key.meridian_combat.view": "切换架势视角",
+  "key.meridian_combat.lock_view": "战斗视角与人物联动",
+  "key.meridian_combat.face_target": "自动面向目标",
   "hud.meridian_combat.stagger.self": "僵直 %s 秒",
   "hud.meridian_combat.stagger.target": "目标僵直 %s 秒"
 }

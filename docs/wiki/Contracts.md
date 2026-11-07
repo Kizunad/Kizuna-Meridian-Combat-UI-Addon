@@ -47,6 +47,8 @@ JOIN 后排队发送完整快照；客户端晚注册接收通道时再排队补
 卷与书名称来自精确引用所属的目录元数据；未分组时三个卷册字段为空。
 字段 1–6 编号保持不变，旧包省略追加字段时，窗口显示无简介、无卷分组的空态。
 每 5 tick 刷新在线玩家的冷却与 `TechniqueBinder` 绑定状态，相同快照不重复发包。
+相对手臂绑定使用同一次 `Inspection.heldItems` 中的主手解剖侧，分别检查主手与副手；
+任一手位的身体绑定成功就不显示身体不可用。持物、弹药、费用与承接仍由真实施放入口校验。
 服务端仅缓存最后发送的投影用于去重，断线与停服清空；不缓存身体、不接收客户端槽位。
 非玩家实体的学会通知不发网络包。
 
@@ -93,14 +95,35 @@ message SlotCommand { SlotOperation operation = 1; int32 slot = 2; string techni
 门面不暴露可变集合，也不提供施放能力。Combat 不依赖 Inventory UI，窗口在 Meridian UI 客户端实现。
 游戏屏幕打开期间清理槽位键的排队次数，配置数字不能留到关闭后的游戏帧施放。
 
-格式版本为 2，包含 `format_version`、`last_profile`、`profiles`、`view`。
+格式版本为 3，包含 `format_version`、`last_profile`、`profiles`、`view`。
 每档包含 ISO-8601 `last_used` 和正好十个字符串 `slots`，空字符串表示空槽。
-`view` 跨档案共享，字段为 `mode`、`shoulder_offset`、`height_offset`、`distance`、`turn_degrees_per_tick`。
+`view` 跨档案共享，字段为 `mode`、`shoulder_offset`、`height_offset`、`distance`、`turn_degrees_per_tick`、
+`lock_current_view`（布尔值，默认 false）、`auto_face_radius`（默认 50）。
+`lock_current_view=true` 表示人物真实朝向与鼠标控制的越肩镜头联动，不冻结相机角度。
+目标朝向优先于视角联动，视角联动优先于普通移动转身；第一人称、界面及预览不接管人物朝向。
 允许值、默认值和编辑方式见 [使用方法](Usage.md)。模式切换立即沿原有文件保存路径持久化。
-格式 1 可读取，默认补第一人称配置，下次正常保存迁移到 2；格式 2 缺少视角字段按损坏处理。
+格式 1/2 可读取，新增字段使用明确默认值，下次正常保存迁移到 3；格式 1 默认第一人称。
+格式 2 缺少原有视角字段仍按损坏处理，格式 3 缺少新增字段同样保护原件。
 完整形状见 `CombatConfigFile` 的编码器；不写入已学列表、架势、临时镜头角、进入前视角、冷却或身体数据。
 文件读取上限 1 MiB，全部解码校验成功后才发布。
 
 正常写入使用同目录临时文件与原子替换；文件系统不支持原子移动时用完整文件替换。
 临时文件在成功和失败路径均清理。解析失败、槽长错误、格式版本不支持时保留原文件，并禁止该会话写回。
 LRU 以 `last_used` 排序，相同时刻也不淘汰当前档。
+
+## 姿态设置客户端门面
+
+`dev.kizuna.meridian.combat.fabric.client.CombatSettingsAccess` 只能在客户端线程调用。
+`snapshot()` 返回不可变 `Snapshot(view, stance, writable)`；`save(CombatStanceSettings)` 只提交锁视角和半径。
+先写候选文件再发布参数，失败返回 `Result(FAILED, message)`，保留原内存配置。
+`keyMapping(Action)` 返回原版注册映射；`saveKeys(Keys)` 沿原版 options 保存并读回检查目标键位。
+两个文件各自提交，UI 须逐项显示结果，不能声称跨文件原子保存。
+
+`previewUnavailableReason()` 返回不可开始的原因；`beginPreview()` 返回 `Preview` 令牌。
+令牌的 `step(Axes, nanoTime)`、`reset()`、`draft()`、`clipped()` 供 UI 编辑及展示；
+`save()` 成功才结束覆盖，失败保持草稿；`close()` 幂等取消。
+失效后 `active()` 为 false，不可通过令牌恢复战斗会话。
+UI 在关闭、录入和切屏时调用 `clearInput()` 清理排队按键与跨屏幕长按。
+
+Combat 不依赖 Meridian UI、Inventory UI 或 owo。目标 UUID、实体引用、镜头角度和草稿不持久化，
+不新增服务端协议。使用方式见[姿态设置](Stance-Settings.md)。

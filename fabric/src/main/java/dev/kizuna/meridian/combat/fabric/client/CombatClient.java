@@ -9,6 +9,8 @@ import dev.kizuna.meridian.combat.core.CombatHud;
 import dev.kizuna.meridian.combat.core.CombatProfiles;
 import dev.kizuna.meridian.combat.core.CombatProtocol;
 import dev.kizuna.meridian.combat.core.CombatSlots;
+import dev.kizuna.meridian.combat.core.CombatViewSettings;
+import dev.kizuna.meridian.combat.core.CombatStanceSettings;
 import dev.kizuna.meridian.combat.fabric.CombatChannels;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotCommand;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
@@ -40,6 +42,7 @@ import java.util.Set;
 /** START_CLIENT_TICK 消费架势内按键，视角控制器接管越肩输入和渲染。 */
 public final class CombatClient implements ClientModInitializer {
     private static final Logger LOGGER = LoggerFactory.getLogger("meridian_combat");
+    private static CombatClient instance;
     private static final KeyMapping.Category KEY_CATEGORY =
             KeyMapping.Category.register(Identifier.fromNamespaceAndPath("meridian_combat", "general"));
     private final CombatHud hud = new CombatHud();
@@ -51,6 +54,11 @@ public final class CombatClient implements ClientModInitializer {
     private KeyMapping stanceKey;
     private KeyMapping slotTenKey;
     private KeyMapping viewKey;
+    private KeyMapping lockViewKey;
+    private KeyMapping faceTargetKey;
+    private boolean lockHeld;
+    private boolean targetHeld;
+    private final CombatScreenInput settingsInput = new CombatScreenInput();
     private CombatViewController views;
     private CombatHudRenderer renderer;
     private String pendingWarning = "";
@@ -69,6 +77,12 @@ public final class CombatClient implements ClientModInitializer {
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_0, KEY_CATEGORY));
         viewKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.meridian_combat.view",
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_V, KEY_CATEGORY));
+        lockViewKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.meridian_combat.lock_view",
+                InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, KEY_CATEGORY));
+        faceTargetKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.meridian_combat.face_target",
+                InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, KEY_CATEGORY));
+        instance = this;
+        CombatSettingsAccess.initialize(this);
         ClientTickEvents.START_CLIENT_TICK.register(this::tick);
         ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> join(client));
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> disconnect());
@@ -80,6 +94,7 @@ public final class CombatClient implements ClientModInitializer {
                 (context, deltaTracker) -> {
                     if (input.state() == CombatInput.State.ACTIVE) {
                         renderer.render(context);
+                        renderTarget(Minecraft.getInstance(), context);
                     }
                 });
     }
@@ -241,6 +256,10 @@ public final class CombatClient implements ClientModInitializer {
 
     private void tick(Minecraft client) {
         // 先处理失效状态，再决定是否取走原版快捷栏按键次数。
+        settingsInput.tick(client);
+        if (views.editing()) {
+            settingsInput.clear(client);
+        }
         discardConfigurationClicks(client);
         CombatInput.Availability availability = availability(client);
         CombatInput.State before = input.state();
@@ -259,12 +278,130 @@ public final class CombatClient implements ClientModInitializer {
         }
         notifyStance(before);
         consumeViewKeys(client, screen);
+        consumeSettingsKeys(client);
         if (input.consumesHotbar(availability, screen)) {
             consumeSlots(client);
         } else {
             while (slotTenKey.consumeClick()) {
                 // 独立按键在架势外不产生行为，也不积存到下次进入。
             }
+        }
+    }
+
+    CombatViewController views() {
+        // 设置门面与正式输入共享同一控制器。
+        return views;
+    }
+
+    CombatSettingsAccess.Snapshot settings() {
+        // 发布只读快照，配置保护状态必须让编辑器可见。
+        return new CombatSettingsAccess.Snapshot(profiles.view(), profiles.stance(), file.writable());
+    }
+
+    CombatSettingsAccess.Result saveSettings(CombatViewSettings view, CombatStanceSettings stance) {
+        // 候选配置写盘成功才发布，失败不会改变正式相机参数。
+        if (!file.writable()) {
+            return new CombatSettingsAccess.Result(CombatSettingsAccess.Status.FAILED,
+                    "原配置处于保护模式，无法持久化；请退出游戏后修复原文件");
+        }
+        try {
+            file.save(profiles.configured(view, stance));
+            profiles.configure(view, stance);
+            views.view().configureLock(stance.viewLock());
+            return new CombatSettingsAccess.Result(CombatSettingsAccess.Status.SAVED, "Combat 偏好已保存");
+        } catch (IOException failure) {
+            LOGGER.warn("Combat 偏好保存失败", failure);
+            return new CombatSettingsAccess.Result(CombatSettingsAccess.Status.FAILED,
+                    "Combat 偏好保存失败，请检查配置目录是否可写；草稿已保留，可重试或取消");
+        }
+    }
+
+    KeyMapping settingsKey(CombatSettingsAccess.Action action) {
+        // 返回原版注册的映射，没有第二份键位配置。
+        return switch (action) {
+            case LOCK_VIEW -> lockViewKey;
+            case FACE_TARGET -> faceTargetKey;
+        };
+    }
+
+    CombatSettingsAccess.Result saveSettingsKeys(CombatSettingsAccess.Keys keys) {
+        // 原版 save 会吞掉 IO 错误，因此写后检查磁盘的两个字段，失败只恢复这两个映射。
+        var previousLock = InputConstants.getKey(lockViewKey.saveString());
+        var previousTarget = InputConstants.getKey(faceTargetKey.saveString());
+        lockViewKey.setKey(keys.lockView());
+        faceTargetKey.setKey(keys.faceTarget());
+        KeyMapping.resetMapping();
+        var game = Minecraft.getInstance();
+        game.options.save();
+        try {
+            var path = FabricLoader.getInstance().getGameDir().resolve("options.txt");
+            var lines = java.nio.file.Files.readAllLines(path);
+            if (!lines.contains("key_" + lockViewKey.getName() + ":" + lockViewKey.saveString())
+                    || !lines.contains("key_" + faceTargetKey.getName() + ":" + faceTargetKey.saveString())) {
+                throw new IOException("options.txt 未保存所选键位");
+            }
+            clearSettingsInput();
+            return new CombatSettingsAccess.Result(CombatSettingsAccess.Status.SAVED, "快捷键已保存");
+        } catch (IOException failure) {
+            LOGGER.warn("Combat 快捷键保存失败", failure);
+            lockViewKey.setKey(previousLock);
+            faceTargetKey.setKey(previousTarget);
+            KeyMapping.resetMapping();
+            return new CombatSettingsAccess.Result(CombatSettingsAccess.Status.FAILED,
+                    "快捷键保存失败（options.txt），草稿已保留，可重试或取消");
+        }
+    }
+
+    void clearSettingsInput() {
+        // 光标与屏幕交由 UI 管理，Combat 只负责丢弃游戏输入。
+        settingsInput.clear(Minecraft.getInstance());
+    }
+
+    public static void releaseSettingsKey(InputConstants.Key key) {
+        // 松开与再次按下可能位于同一 tick，释放事件必须立即解除长按屏障。
+        var owner = instance;
+        if (owner == null) {
+            return;
+        }
+        if (owner.lockViewKey.matches(key)) {
+            owner.lockHeld = false;
+        }
+        if (owner.faceTargetKey.matches(key)) {
+            owner.targetHeld = false;
+        }
+    }
+
+    private void consumeSettingsKeys(Minecraft client) {
+        // 长按及系统 repeat 只触发一次，界面打开时仍消费但不执行。
+        boolean lockClicked = lockViewKey.consumeClick();
+        boolean targetClicked = faceTargetKey.consumeClick();
+        while (lockViewKey.consumeClick() || faceTargetKey.consumeClick()) {
+            // 同帧重复点击合并，不积存到下次可操作时。
+        }
+        if (client.gui.screen() == null && client.isWindowActive()
+                && CombatViewController.forShoulder(client.player) != null) {
+            if (lockClicked && !lockHeld) {
+                var result = saveSettings(profiles.view(), profiles.stance().toggleLock());
+                actionbar(client, result.message());
+            }
+            if (targetClicked && !targetHeld) {
+                actionbar(client, views.toggleTarget(client));
+            }
+        }
+        lockHeld = lockViewKey.isDown();
+        targetHeld = faceTargetKey.isDown();
+    }
+
+    private void renderTarget(Minecraft client, net.minecraft.client.gui.GuiGraphicsExtractor context) {
+        // 目标反馈遵守十槽 HUD 的隐藏及开屏规则。
+        if (client.gui.hud.isHidden() || client.gui.screen() != null) {
+            return;
+        }
+        String name = views.targetName();
+        if (!name.isEmpty()) {
+            int margin = client.font.lineHeight;
+            context.text(client.font, Component.literal("锁定：" + name), margin, margin,
+                    net.minecraft.util.ARGB.white(1.0f), true /* shadow */);
         }
     }
 

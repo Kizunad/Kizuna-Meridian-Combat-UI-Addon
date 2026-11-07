@@ -3,6 +3,8 @@ package dev.kizuna.meridian.combat.fabric;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import dev.kizuna.meridian.core.BodySnapshot;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Hand;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HandSide;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
@@ -21,7 +23,7 @@ final class CombatKnownProjection {
         // 投影不持有身体或客户端槽位。
     }
 
-    static KnownTechniques snapshot(TechniqueRegistry registry, BodySnapshot body) {
+    static KnownTechniques snapshot(TechniqueRegistry registry, BodySnapshot body, HandSide mainHandSide) {
         // 每个身份只展示目录中仍存在的最高已学版本，与实际施放选择一致。
         var progress = TechniqueState.read(body);
         var definitions = new TreeMap<String, TechniqueDefinition>();
@@ -36,8 +38,8 @@ final class CombatKnownProjection {
             String id = definition.getId();
             long end = Math.max(progress.getCooldownsOrDefault(id, 0), progress.getCurveEndsOrDefault(id, 0));
             long remaining = Math.max(0, end - now);
-            var binding = TechniqueBinder.bind(body, definition);
-            result.addTechniques(entry(registry, volumes, definition, remaining, binding.getFailure()));
+            TechniqueFailure failure = bindingFailure(body, definition, mainHandSide);
+            result.addTechniques(entry(registry, volumes, definition, remaining, failure));
         }
         return result.build();
     }
@@ -75,6 +77,19 @@ final class CombatKnownProjection {
             registry.bookOf(reference).ifPresent(book -> result.setBookName(book.getDisplayName()));
         }
         return result.build();
+    }
+
+    static TechniqueFailure bindingFailure(BodySnapshot body, TechniqueDefinition definition, HandSide mainHandSide) {
+        // HUD 只投影身体能力：任一手位可绑定即可展示，实际持物仍由施放服务检查。
+        var main = TechniqueBinder.bind(body, definition, Hand.MAIN_HAND, mainHandSide);
+        if (main.hasBinding()) {
+            return TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED;
+        }
+        var off = TechniqueBinder.bind(body, definition, Hand.OFF_HAND, mainHandSide);
+        if (off.hasBinding()) {
+            return TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED;
+        }
+        return main.getFailure();
     }
 
     private static TechniqueDefinition newer(TechniqueDefinition first, TechniqueDefinition second) {

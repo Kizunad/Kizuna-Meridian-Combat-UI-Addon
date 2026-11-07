@@ -1,5 +1,6 @@
 - [首页](Home.md)
 - [使用方法](Usage.md)
+- [姿态设置](Stance-Settings.md)
 - [构建与验证](Verification.md)
 - [网络与配置契约](Contracts.md)
 - [整合接口与方案问题](Integration.md)

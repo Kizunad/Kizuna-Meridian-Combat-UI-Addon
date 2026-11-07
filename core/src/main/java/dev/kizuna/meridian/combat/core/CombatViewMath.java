@@ -46,5 +46,25 @@ public final class CombatViewMath {
         return remainder;
     }
 
+    public static CombatView.Angles face(CombatCamera.Offset delta, CombatView.Angles current, float maximumStep) {
+        // 同位置保持角度，垂直重合保持 yaw；俯仰按同一转身限速推进。
+        double x = delta.x();
+        double y = delta.y();
+        double z = delta.z();
+        double horizontal = Math.hypot(x, z);
+        if (horizontal == 0 && y == 0) {
+            return current;
+        }
+        float currentYaw = current.yaw();
+        float currentPitch = current.pitch();
+        float targetYaw = currentYaw;
+        if (horizontal != 0) {
+            targetYaw = (float) Math.toDegrees(Math.atan2(-x, z));
+        }
+        float targetPitch = (float) -Math.toDegrees(Math.atan2(y, horizontal));
+        float pitchStep = Math.max(-maximumStep, Math.min(maximumStep, targetPitch - currentPitch));
+        return new CombatView.Angles(turnYaw(currentYaw, targetYaw, maximumStep), currentPitch + pitchStep);
+    }
+
     public record Axes(float forward, float sideways) { }
 }

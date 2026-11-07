@@ -54,7 +54,7 @@ public final class CombatViewConfigTest {
         assertEquals(CombatViewSettings.DEFAULT, profiles.view());
         assertEquals("sample:step", profiles.slots().get(CombatIds.SLOT_COUNT - 1));
         file.save(profiles);
-        assertTrue(Files.readString(path).contains("\"format_version\": 2"));
+        assertTrue(Files.readString(path).contains("\"format_version\": " + CombatConfigFile.FORMAT_VERSION));
         assertEquals(profiles.snapshot(), new CombatConfigFile(path).load().snapshot());
     }
 
@@ -63,7 +63,7 @@ public final class CombatViewConfigTest {
         // 错误枚举、非有限值、越界、缺字段及未来版本都禁止覆盖原件。
         List<String> invalidViews = List.of(
                 "{\"mode\":\"UNKNOWN\"}",
-                "{\"mode\":\"SHOULDER\",\"shoulder_offset\":-1,\"height_offset\":0,"
+                "{\"mode\":\"SHOULDER\",\"shoulder_offset\":-5,\"height_offset\":0,"
                         + "\"distance\":3,\"turn_degrees_per_tick\":18}",
                 "{\"mode\":\"SHOULDER\",\"shoulder_offset\":0,\"height_offset\":0,"
                         + "\"distance\":3,\"turn_degrees_per_tick\":\"NaN\"}",

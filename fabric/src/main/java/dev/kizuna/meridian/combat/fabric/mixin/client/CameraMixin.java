@@ -38,7 +38,9 @@ abstract class CameraMixin {
         }
         var angles = controller.view().camera();
         setRotation(angles.yaw(), angles.pitch());
-        var offset = CombatCameraCollision.clip(level, entity, position, controller.cameraOffset());
+        var desired = controller.cameraOffset();
+        var offset = CombatCameraCollision.clip(level, entity, position, desired);
+        controller.cameraClipped(desired, offset);
         setPosition(position.add(offset.x(), offset.y(), offset.z()));
         detached = true;
         callback.cancel();

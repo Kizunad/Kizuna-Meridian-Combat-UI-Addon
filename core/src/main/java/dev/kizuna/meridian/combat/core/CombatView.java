@@ -10,6 +10,7 @@ public final class CombatView {
     private Mode mode;
     private Perspective original;
     private Angles camera = new Angles(0, 0);
+    private CombatStanceSettings.ViewLock lock = CombatStanceSettings.ViewLock.OFF;
 
     public CombatView(Mode mode) {
         // 已持久化的模式可跨连接沿用，进入前视角只在会话内保存。
@@ -45,7 +46,7 @@ public final class CombatView {
     }
 
     public void rotate(float yawDelta, float pitchDelta) {
-        // 鼠标只更新镜头，俯仰沿用原版上下九十度边界。
+        // 越肩镜头始终响应鼠标；是否让人物跟随由客户端按朝向优先级协调。
         if (shoulder()) {
             float pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, camera.pitch() + pitchDelta));
             camera = new Angles(CombatViewMath.wrapYaw(camera.yaw() + yawDelta), pitch);
@@ -55,6 +56,23 @@ public final class CombatView {
     public boolean active() {
         // 原视角同时标识当前会话是否持有恢复责任。
         return original != null;
+    }
+
+    public void configureLock(CombatStanceSettings.ViewLock preference) {
+        // 联动只改变人物是否跟随镜头，不冻结或重置当前镜头角度。
+        lock = Objects.requireNonNull(preference);
+    }
+
+    public boolean locked() {
+        // 只有有效越肩会话允许人物与镜头联动，第一人称仍走原版输入。
+        return shoulder() && lock == CombatStanceSettings.ViewLock.ON;
+    }
+
+    public void restoreCamera(Angles angles) {
+        // 预览取消只能恢复仍有效的越肩会话，不重新进入架势。
+        if (shoulder()) {
+            camera = Objects.requireNonNull(angles);
+        }
     }
 
     public boolean shoulder() {

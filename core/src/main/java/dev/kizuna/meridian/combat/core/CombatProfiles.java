@@ -14,6 +14,7 @@ public final class CombatProfiles {
     private final Map<String, Profile> profiles;
     private String current;
     private CombatViewSettings view;
+    private CombatStanceSettings stance = CombatStanceSettings.DEFAULT;
 
     public CombatProfiles() {
         // 首次进入服务器前没有当前档。
@@ -39,6 +40,24 @@ public final class CombatProfiles {
     public CombatViewSettings view() {
         // 视角偏好跨服务器共享，不跟随槽位档案复制或淘汰。
         return view;
+    }
+
+    public CombatStanceSettings stance() {
+        // 不可变共享偏好不随服务器槽位档案切换。
+        return stance;
+    }
+
+    public void configure(CombatViewSettings settings, CombatStanceSettings preferences) {
+        // 只发布经过 record 校验的完整配置。
+        view = java.util.Objects.requireNonNull(settings);
+        stance = java.util.Objects.requireNonNull(preferences);
+    }
+
+    public CombatProfiles configured(CombatViewSettings settings, CombatStanceSettings preferences) {
+        // 保存前创建候选快照，写盘失败不得提前发布正式参数。
+        var result = new CombatProfiles(current, profiles, settings);
+        result.configure(settings, preferences);
+        return result;
     }
 
     public void selectViewMode(CombatView.Mode mode) {

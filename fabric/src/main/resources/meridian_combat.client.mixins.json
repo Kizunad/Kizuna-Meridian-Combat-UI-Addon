@@ -3,6 +3,7 @@
   "package": "dev.kizuna.meridian.combat.fabric.mixin.client",
   "compatibilityLevel": "JAVA_25",
   "client": [
+    "KeyboardMixin",
     "MouseMixin",
     "EntityMovementMixin",
     "ClientPlayerMixin",

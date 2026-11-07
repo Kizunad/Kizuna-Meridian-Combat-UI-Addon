@@ -18,8 +18,9 @@ import java.util.LinkedHashMap;
 
 /** 损坏文件只读保护；正常保存使用同目录临时文件整份替换。 */
 public final class CombatConfigFile {
-    public static final int FORMAT_VERSION = 2;
+    public static final int FORMAT_VERSION = 3;
     private static final String LEGACY_VERSION = "1";
+    private static final String VIEW_VERSION = "2";
     private static final int MAX_FILE_BYTES = 1_048_576;
     private static final Gson JSON = new GsonBuilder().setPrettyPrinting().create();
     private final Path path;
@@ -42,7 +43,8 @@ public final class CombatConfigFile {
             }
             JsonObject root = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8)).getAsJsonObject();
             String version = root.get("format_version").getAsString();
-            if (!Integer.toString(FORMAT_VERSION).equals(version) && !LEGACY_VERSION.equals(version)) {
+            if (!Integer.toString(FORMAT_VERSION).equals(version)
+                    && !LEGACY_VERSION.equals(version) && !VIEW_VERSION.equals(version)) {
                 throw new IllegalArgumentException("战斗配置版本不受支持");
             }
             return decode(root);
@@ -96,10 +98,29 @@ public final class CombatConfigFile {
             profiles.put(entry.getKey(), new CombatProfiles.Profile(lastUsed, slots));
         }
         CombatViewSettings view = CombatViewSettings.DEFAULT;
-        if (!LEGACY_VERSION.equals(root.get("format_version").getAsString())) {
-            view = decodeView(root.getAsJsonObject("view"));
+        String version = root.get("format_version").getAsString();
+        JsonObject viewConfig = root.getAsJsonObject("view");
+        if (!LEGACY_VERSION.equals(version)) {
+            view = decodeView(viewConfig);
         }
-        return new CombatProfiles(string(root.get("last_profile")), profiles, view);
+        var decoded = new CombatProfiles(string(root.get("last_profile")), profiles, view);
+        if (Integer.toString(FORMAT_VERSION).equals(version)) {
+            decoded.configure(view, decodeStance(viewConfig));
+        }
+        return decoded;
+    }
+
+    private static CombatStanceSettings decodeStance(JsonObject settings) {
+        // 新格式要求完整姿态字段，旧格式只在解码主流程中补明确默认值。
+        var lock = settings.get("lock_current_view");
+        if (lock == null || !lock.isJsonPrimitive() || !lock.getAsJsonPrimitive().isBoolean()) {
+            throw new IllegalArgumentException("锁视角字段必须是布尔值");
+        }
+        var preference = CombatStanceSettings.ViewLock.OFF;
+        if (lock.getAsBoolean()) {
+            preference = CombatStanceSettings.ViewLock.ON;
+        }
+        return new CombatStanceSettings(preference, number(settings.get("auto_face_radius")));
     }
 
     private static CombatViewSettings decodeView(JsonObject view) {
@@ -139,7 +160,10 @@ public final class CombatConfigFile {
             entries.add(key, entry);
         });
         root.add("profiles", entries);
-        root.add("view", encodeView(profiles.view()));
+        JsonObject view = encodeView(profiles.view());
+        view.addProperty("lock_current_view", profiles.stance().viewLock() == CombatStanceSettings.ViewLock.ON);
+        view.addProperty("auto_face_radius", profiles.stance().targetRadius());
+        root.add("view", view);
         return root;
     }
 

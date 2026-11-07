@@ -45,7 +45,9 @@ public final class CombatCasting {
         if (host.isEmpty()) {
             return KnownTechniques.getDefaultInstance();
         }
-        var snapshot = CombatKnownProjection.snapshot(service.registry(), host.get().inspect().body());
+        var inspection = host.get().inspect();
+        var snapshot = CombatKnownProjection.snapshot(service.registry(), inspection.body(),
+                inspection.heldItems().getMainHandSide());
         CombatProtocol.decodeKnown(snapshot.toByteArray()); // 校验整体大小与字段，越界时拒绝发布。
         return snapshot;
     }

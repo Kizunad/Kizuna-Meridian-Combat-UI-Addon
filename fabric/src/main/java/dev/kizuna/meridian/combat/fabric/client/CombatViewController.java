@@ -5,6 +5,7 @@ import dev.kizuna.meridian.combat.core.CombatInput;
 import dev.kizuna.meridian.combat.core.CombatProfiles;
 import dev.kizuna.meridian.combat.core.CombatView;
 import dev.kizuna.meridian.combat.core.CombatViewMath;
+import dev.kizuna.meridian.combat.core.CombatCameraEdit;
 import net.minecraft.client.CameraType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -17,11 +18,18 @@ public final class CombatViewController {
     private static CombatViewController instance;
     private final CombatProfiles profiles;
     private final CombatView view;
+    private final CombatTargets targets = new CombatTargets();
+    private CombatCameraEdit preview;
+    private CombatView.Angles previewAngles;
+    private Object sessionWorld;
+    private Entity sessionPlayer;
+    private boolean clipped;
 
     public CombatViewController(CombatProfiles profiles) {
         // 客户端初始化之前 Mixin 可执行，但此时不接管游戏行为。
         this.profiles = profiles;
         this.view = new CombatView(profiles.view().mode());
+        view.configureLock(profiles.stance().viewLock());
         instance = this;
     }
 
@@ -39,12 +47,25 @@ public final class CombatViewController {
 
     public void reconcile(Minecraft client, CombatInput.State state) {
         // 原视角只在首次进入时记录；所有退出原因均恢复同一快照。
-        if (state == CombatInput.State.ACTIVE && client.player != null) {
+        boolean valid = state == CombatInput.State.ACTIVE && client.player != null
+                && client.getCameraEntity() == client.player && client.player.isAlive() && !client.player.isSpectator();
+        if (sessionWorld != client.level || sessionPlayer != client.player) {
+            invalidate();
+            sessionWorld = client.level;
+            sessionPlayer = client.player;
+        }
+        if (valid) {
             view.enter(toCore(client.options.getCameraType()), facing(client.player));
+            view.configureLock(profiles.stance().viewLock());
             applyPerspective(client, toMinecraft(view.perspective()));
         } else if (view.active()) {
+            invalidate();
             applyPerspective(client, toMinecraft(view.exit()));
         }
+        if (!view.shoulder()) {
+            invalidate();
+        }
+        targets.validate(client, profiles.stance().targetRadius());
     }
 
     public void toggle(LocalPlayer player) {
@@ -60,7 +81,14 @@ public final class CombatViewController {
 
     public void look(double deltaX, double deltaY) {
         // MouseHandler 已处理灵敏度、平滑与反转，这里只沿用 Entity 的角度缩放。
+        var client = Minecraft.getInstance();
+        if (preview != null || client.gui.screen() != null || !client.isWindowActive()) {
+            return;
+        }
         view.rotate((float) deltaX * LOOK_DEGREES, (float) deltaY * LOOK_DEGREES);
+        if (view.locked() && targets.current() == null) {
+            followCamera(client.player);
+        }
     }
 
     public Vec3 relativeInput(float entityYaw, Vec3 input) {
@@ -73,11 +101,36 @@ public final class CombatViewController {
     public void turn(LocalPlayer player) {
         // ClientInput.tick 后读取本 tick 移动轴，在原版移动与发包之前限速转身。
         // 26.2 的移动向量已归一化（x 向左、y 向前），朝向只取方向，与原先的两个冲量等价。
+        if (Minecraft.getInstance().gui.screen() != null || preview != null) {
+            return;
+        }
+        float turnLimit = profiles.view().turnDegreesPerTick();
+        Entity targetEntity = targets.current();
+        if (targetEntity != null) {
+            Vec3 delta = CombatTargets.aim(targetEntity).subtract(player.getEyePosition());
+            var offset = new CombatCamera.Offset(delta.x, delta.y, delta.z);
+            var angles = CombatViewMath.face(offset, facing(player), turnLimit);
+            player.setYRot(angles.yaw());
+            player.setXRot(angles.pitch());
+            return;
+        }
+        if (view.locked()) {
+            followCamera(player);
+            return;
+        }
         var move = player.input.getMoveVector();
         float currentYaw = player.getYRot();
         float target = CombatViewMath.movementYaw(move.y, move.x, view.camera().yaw(), currentYaw);
-        float yaw = CombatViewMath.turnYaw(currentYaw, target, profiles.view().turnDegreesPerTick());
+        float yaw = CombatViewMath.turnYaw(currentYaw, target, turnLimit);
         player.setYRot(yaw);
+    }
+
+    private void followCamera(LocalPlayer player) {
+        // 原版 turn 同步插值基线和乘坐朝向；取最短角差，避免跨正负一百八十度时绕整圈。
+        var camera = view.camera();
+        float yawDelta = CombatViewMath.wrapYaw(camera.yaw() - player.getYRot());
+        float pitchDelta = camera.pitch() - player.getXRot();
+        player.turn(yawDelta / LOOK_DEGREES, pitchDelta / LOOK_DEGREES);
     }
 
     public float jumpYaw(LocalPlayer player) {
@@ -88,7 +141,72 @@ public final class CombatViewController {
 
     public CombatCamera.Offset cameraOffset() {
         // 几何参数来自同一份已校验本地配置。
-        return CombatCamera.desired(view.camera(), profiles.view());
+        var settings = profiles.view();
+        if (preview != null) {
+            settings = preview.draft();
+        }
+        return CombatCamera.desired(view.camera(), settings);
+    }
+
+    String toggleTarget(Minecraft client) {
+        // 按键入口已校验第三人称和无界面，实体选择与清理集中维护。
+        return targets.toggle(client, profiles.stance().targetRadius());
+    }
+
+    String targetName() {
+        // HUD 只展示已锁定目标名称，不提供额外透视效果。
+        Entity target = targets.current();
+        if (target == null) {
+            return "";
+        }
+        return target.getName().getString();
+    }
+
+    CombatCameraEdit beginPreview() {
+        // 草稿只覆盖当前有效会话，进入时解除自动朝向。
+        if (forShoulder(Minecraft.getInstance().player) != this || preview != null) {
+            throw new IllegalStateException("须先 R 进入架势、V 切到越肩模式");
+        }
+        targets.clear();
+        previewAngles = view.camera();
+        preview = new CombatCameraEdit(profiles.view(), System.nanoTime());
+        return preview;
+    }
+
+    boolean previewing(CombatCameraEdit editor) {
+        // 用草稿身份拒绝已失效或前一窗口的编辑器。
+        return preview == editor && forShoulder(Minecraft.getInstance().player) == this;
+    }
+
+    boolean editing() {
+        // 输入适配器在原版移动和快捷键处理之前清理编辑期间的游戏输入。
+        return preview != null;
+    }
+
+    void endPreview(CombatCameraEdit editor) {
+        // 只恢复仍存活会话的原角度；不会复活已退出的架势。
+        if (preview == editor) {
+            view.restoreCamera(previewAngles);
+            preview = null;
+            previewAngles = null;
+        }
+    }
+
+    public void cameraClipped(CombatCamera.Offset desired, CombatCamera.Offset actual) {
+        // 只记录碰撞反馈，期望参数继续保存在独立草稿。
+        clipped = !desired.equals(actual);
+    }
+
+    boolean clipped() {
+        // 供编辑器显示当前帧碰撞说明。
+        return clipped;
+    }
+
+    private void invalidate() {
+        // 失效清理不恢复角度、不保存草稿，也不再选择目标。
+        preview = null;
+        previewAngles = null;
+        targets.clear();
     }
 
     private static CombatView.Angles facing(Entity entity) {

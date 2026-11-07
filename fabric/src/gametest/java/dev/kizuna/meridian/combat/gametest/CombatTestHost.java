@@ -19,6 +19,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueActivityCommit;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostRequest;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostResponse;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueHostFacts;
 import dev.kizuna.meridian.technique.server.TechniqueHost;
 import dev.kizuna.meridian.technique.server.TechniqueHostEntrypoint;
 import dev.kizuna.meridian.technique.server.TechniqueProtocol;
@@ -73,6 +74,7 @@ public final class CombatTestHost implements TechniqueHostEntrypoint, TechniqueR
                     .build();
             response.setBody(BodyProtobuf.toMessage(body.inspect()));
             response.setHeldItems(hands);
+            response.setInspectFacts(inspectFacts());
         } else if (request.hasActivity()) {
             response.setActivity(body.submit(request));
         } else if (request.hasEffect()) {
@@ -81,6 +83,17 @@ public final class CombatTestHost implements TechniqueHostEntrypoint, TechniqueR
             throw new IllegalArgumentException("测试宿主收到未知操作");
         }
         return TechniqueProtocol.encodeHostResponse(response.build());
+    }
+
+    private static TechniqueHostFacts inspectFacts() {
+        // 测试玩家按站地静止状态接入现有宿主协议，五项事实必须显式提供。
+        return TechniqueHostFacts.newBuilder()
+                .setGrounded(true /* grounded */)
+                .setInWater(false /* inWater */)
+                .setClimbing(false /* climbing */)
+                .setRiding(false /* riding */)
+                .setGliding(false /* gliding */)
+                .build();
     }
 
     static final class Body {

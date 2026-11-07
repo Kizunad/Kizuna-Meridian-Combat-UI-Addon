@@ -19,10 +19,10 @@ public record CombatViewSettings(CombatView.Mode mode, double shoulderOffset, do
                     DEFAULT_HEIGHT_OFFSET, DEFAULT_DISTANCE, DEFAULT_TURN_DEGREES_PER_TICK);
 
     public CombatViewSettings {
-        // 拒绝非有限值与反向偏移，保证镜头始终位于右肩、上方和后方。
+        // 允许左右肩与上下偏移，所有几何参数必须有限。
         Objects.requireNonNull(mode);
-        validateRange(shoulderOffset, 0, MAX_OFFSET);
-        validateRange(heightOffset, 0, MAX_OFFSET);
+        validateRange(shoulderOffset, -MAX_OFFSET, MAX_OFFSET);
+        validateRange(heightOffset, -MAX_OFFSET, MAX_OFFSET);
         validateRange(distance, MIN_DISTANCE, MAX_DISTANCE);
         validateRange(turnDegreesPerTick, MIN_TURN, MAX_TURN);
     }
