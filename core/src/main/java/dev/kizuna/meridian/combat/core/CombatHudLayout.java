@@ -10,6 +10,13 @@ public final class CombatHudLayout {
     public static final int ICON_INSET = 3;
     public static final int LABEL_Y = 24;
     public static final int WIDTH = (CombatIds.SLOT_COUNT - 1) * SLOT_PITCH + SLOT_SIZE;
+    /** 僵直提示写在槽条上边缘之上的这一行。 */
+    public static final int STAGGER_Y = -10;
+    /** 原版动作栏消息的中线离屏幕底边的距离。 */
+    public static final int VANILLA_MESSAGE_OFFSET = 68;
+    /** 动作栏一行连底衬在中线之下占的高度：文字从中线上 4 像素起笔、行高 9，底衬再多 2 像素。 */
+    private static final int MESSAGE_BELOW_CENTER = 7;
+    private static final int MESSAGE_GAP = 1;
     private static final int HALF = 2;
 
     private CombatHudLayout() {
@@ -31,6 +38,12 @@ public final class CombatHudLayout {
             return tenthKey;
         }
         return hotbarKeys.get(index);
+    }
+
+    public static int messageLift(int barTopOffset) {
+        // 架势中动作栏消息整行移到槽条和僵直提示之上，留一像素空隙；原版位置本就在上方时不动。
+        int centerOffset = barTopOffset - STAGGER_Y + MESSAGE_BELOW_CENTER + MESSAGE_GAP;
+        return Math.max(0, centerOffset - VANILLA_MESSAGE_OFFSET);
     }
 
     public static int cooldownTop(double fraction) {

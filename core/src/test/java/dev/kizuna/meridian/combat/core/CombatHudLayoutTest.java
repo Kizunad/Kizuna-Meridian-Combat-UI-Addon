@@ -6,6 +6,7 @@ import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 public final class CombatHudLayoutTest {
     private static final int FULL_HD_WIDTH = 1920;
@@ -16,6 +17,10 @@ public final class CombatHudLayoutTest {
     private static final int MAX_GUI_SCALE = 4;
     private static final double HALF_COOLDOWN = 0.5;
     private static final int HALF_ICON = 8;
+    private static final int SURVIVAL_BAR_TOP = 86;
+    private static final int CREATIVE_BAR_TOP = 61;
+    private static final int LOW_BAR_TOP = 40;
+    private static final int MESSAGE_BELOW_CENTER = 7;
 
     @Test
     public void integerScalesKeepVanillaCenterAndFixedOverhang() {
@@ -44,6 +49,18 @@ public final class CombatHudLayoutTest {
         assertEquals(CombatHudLayout.ICON_INSET, CombatHudLayout.cooldownTop(1));
         assertEquals(CombatHudLayout.ICON_INSET + HALF_ICON, CombatHudLayout.cooldownTop(HALF_COOLDOWN));
         assertEquals(CombatHudLayout.ICON_INSET + CombatHudLayout.ICON_SIZE, CombatHudLayout.cooldownTop(0));
+    }
+
+    @Test
+    public void actionBarMessageClearsTheSlotBarAndStaggerLine() {
+        // 生存、创造两档槽条高度下，抬起后的动作栏一行（连底衬）整行在僵直提示之上；槽条低于原版消息时不抬。
+        for (int barTop : new int[] {SURVIVAL_BAR_TOP, CREATIVE_BAR_TOP}) {
+            int center = CombatHudLayout.VANILLA_MESSAGE_OFFSET + CombatHudLayout.messageLift(barTop);
+            int staggerTop = barTop - CombatHudLayout.STAGGER_Y;
+            assertTrue("动作栏压住了僵直提示：" + barTop, center - MESSAGE_BELOW_CENTER > staggerTop);
+            assertTrue("动作栏抬得过高：" + barTop, center - MESSAGE_BELOW_CENTER - staggerTop <= HALF);
+        }
+        assertEquals(0, CombatHudLayout.messageLift(LOW_BAR_TOP));
     }
 
     private static void assertCentered(int width) {

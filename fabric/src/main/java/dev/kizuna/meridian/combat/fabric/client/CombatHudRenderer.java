@@ -22,6 +22,7 @@ import static dev.kizuna.meridian.combat.core.CombatHudLayout.ICON_INSET;
 import static dev.kizuna.meridian.combat.core.CombatHudLayout.ICON_SIZE;
 import static dev.kizuna.meridian.combat.core.CombatHudLayout.SLOT_PITCH;
 import static dev.kizuna.meridian.combat.core.CombatHudLayout.SLOT_SIZE;
+import static dev.kizuna.meridian.combat.core.CombatHudLayout.STAGGER_Y;
 
 /** 只绘制客户端投影，不参与施放校验；槽框可由资源包整套替换。 */
 final class CombatHudRenderer {
@@ -42,7 +43,6 @@ final class CombatHudRenderer {
     private static final int MIN_HEALTH_ROW_HEIGHT = 3;
     private static final int HALF = 2;
     private static final int TIMER_Y = 7;
-    private static final int STAGGER_Y = -10;
     private static final int TEXT_COLOR = 0xffffffff;
     private static final int KEY_COLOR = 0xffaaaaaa;
     private static final int OUTLINE_COLOR = 0xff000000;
@@ -122,6 +122,11 @@ final class CombatHudRenderer {
     private static String seconds(long millis) {
         // 僵直不足一秒，保留一位小数才看得出长短。
         return String.format(Locale.ROOT, "%.1f", (double) millis / MILLIS_PER_SECOND);
+    }
+
+    static int messageLift(Minecraft client) {
+        // 槽条随生命值行数上移时，动作栏消息跟着抬到它上方。
+        return CombatHudLayout.messageLift(bottomOffset(client));
     }
 
     private static int bottomOffset(Minecraft client) {

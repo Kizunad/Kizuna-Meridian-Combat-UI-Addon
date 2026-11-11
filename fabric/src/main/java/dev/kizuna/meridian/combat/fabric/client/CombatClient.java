@@ -20,7 +20,9 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElement;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
@@ -97,6 +99,22 @@ public final class CombatClient implements ClientModInitializer {
                         renderTarget(Minecraft.getInstance(), context);
                     }
                 });
+        HudElementRegistry.replaceElement(VanillaHudElements.OVERLAY_MESSAGE, this::liftedInStance);
+    }
+
+    private HudElement liftedInStance(HudElement vanilla) {
+        // 槽条正好占着原版动作栏消息那一行；架势中把消息整行抬到槽条上方，施放拒绝说明不被槽条盖住。
+        return (context, deltaTracker) -> {
+            if (input.state() != CombatInput.State.ACTIVE) {
+                vanilla.extractRenderState(context, deltaTracker);
+                return;
+            }
+            var matrices = context.pose();
+            matrices.pushMatrix();
+            matrices.translate(0, -CombatHudRenderer.messageLift(Minecraft.getInstance()));
+            vanilla.extractRenderState(context, deltaTracker);
+            matrices.popMatrix();
+        };
     }
 
     private void load() {
