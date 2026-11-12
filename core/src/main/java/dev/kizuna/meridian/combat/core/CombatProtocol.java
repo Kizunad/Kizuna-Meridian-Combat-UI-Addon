@@ -56,14 +56,14 @@ public final class CombatProtocol {
                 if (!entry.getVolumeId().isEmpty()) {
                     CombatIds.validateTechnique(entry.getVolumeId());
                 }
-                long remaining = entry.getCooldownRemainingMillis();
+                long endTick = entry.getCooldownEndTick();
                 long total = entry.getCooldownTotalMillis();
                 if (!identities.add(id) || entry.getName().length() > MAX_NAME_LENGTH
                         || entry.getUnavailableReason().length() > MAX_NAME_LENGTH
                         || entry.getDescription().length() > MAX_DESCRIPTION_LENGTH
                         || entry.getVolumeName().length() > MAX_NAME_LENGTH
                         || entry.getBookName().length() > MAX_NAME_LENGTH
-                        || remaining < 0 || total < remaining || total > MAX_COOLDOWN_MILLIS) {
+                        || endTick < 0 || total < 0 || total > MAX_COOLDOWN_MILLIS) {
                     throw new IllegalArgumentException("功法投影的身份、文字或冷却范围无效");
                 }
             }

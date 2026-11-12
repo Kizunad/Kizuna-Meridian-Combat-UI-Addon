@@ -8,60 +8,68 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** 十槽显示模型；本地计时只影响表现，不产生施放权限或持久化冷却。 */
+/** 十槽显示模型；冷却按世界 tick 对照服务端给的结束时刻，只影响表现，不产生施放权限或持久化冷却。 */
 public final class CombatHud {
-    private final Map<String, KnownTechnique> known = new HashMap<>();
-    private long receivedMillis;
+    public static final long MILLIS_PER_TICK = 50;
+    private final Map<String, Display> known = new HashMap<>();
+
+    /** 一门已学功法不随时间变的显示内容：列表到达时算好，逐帧只算冷却。 */
+    private record Display(KnownTechnique entry, String name, String texture) { }
 
     public enum State { EMPTY, UNAVAILABLE, COOLDOWN, AVAILABLE }
 
     public record Slot(int number, String name, String texture, State state,
                        double cooldownFraction, long remainingMillis) { }
 
-    public void update(KnownTechniques snapshot, long nowMillis) {
+    public void update(KnownTechniques snapshot) {
         // 整份替换使切服、重学和内容移除不会沿用过期的图标与冷却。
         known.clear();
-        snapshot.getTechniquesList().forEach(entry -> known.put(entry.getId(), entry));
-        receivedMillis = nowMillis;
+        for (KnownTechnique entry : snapshot.getTechniquesList()) {
+            String name = entry.getName();
+            if (name.isEmpty()) {
+                name = entry.getId();
+            }
+            known.put(entry.getId(), new Display(entry, name, texture(entry.getIconId())));
+        }
     }
 
     public void clear() {
         // 断线与非法网络包同时清理全部暂态数据。
         known.clear();
-        receivedMillis = 0;
     }
 
-    public List<Slot> slots(List<String> bindings, long nowMillis) {
+    /** gameTick 是客户端当前世界总 tick，与服务端填 cooldown_end_tick 用的是同一时基。 */
+    public List<Slot> slots(List<String> bindings, long gameTick) {
         // 保留重复绑定和十槽顺序，不按已学列表顺序重新排列。
         if (bindings.size() != CombatIds.SLOT_COUNT) {
             throw new IllegalArgumentException("HUD 必须有十个槽位");
         }
         var result = new ArrayList<Slot>();
-        long elapsed = Math.max(0, nowMillis - receivedMillis);
         for (int index = 0; index < bindings.size(); index++) {
-            result.add(slot(index + 1, bindings.get(index), elapsed));
+            result.add(slot(index + 1, bindings.get(index), gameTick));
         }
         return List.copyOf(result);
     }
 
-    private Slot slot(int number, String id, long elapsed) {
+    private Slot slot(int number, String id, long gameTick) {
         // 身体不可用优先显示叉号；冷却数据仍保留供恢复绑定后的下一次绘制。
         if (id.isEmpty()) {
             return new Slot(number, "空", "", State.EMPTY, 0, 0);
         }
-        var entry = known.get(id);
-        if (entry == null) {
+        Display display = known.get(id);
+        if (display == null) {
             return new Slot(number, "未学", "", State.UNAVAILABLE, 0, 0);
         }
-        String name = entry.getName();
-        if (name.isEmpty()) {
-            name = id;
-        }
-        long remaining = Math.max(0, entry.getCooldownRemainingMillis() - elapsed);
+        KnownTechnique entry = display.entry();
+        long remaining = Math.max(0, entry.getCooldownEndTick() - gameTick) * MILLIS_PER_TICK;
         long total = entry.getCooldownTotalMillis();
         double fraction = 0;
-        if (total > 0) {
-            fraction = Math.min(1, (double) remaining / total);
+        if (remaining > 0) {
+            // 剩余超过声明的冷却（招式曲线还没走完）或没有声明冷却时画满格。
+            fraction = 1;
+            if (total > 0) {
+                fraction = Math.min(1, (double) remaining / total);
+            }
         }
         State state = State.AVAILABLE;
         if (!entry.getUnavailableReason().isEmpty()) {
@@ -69,7 +77,7 @@ public final class CombatHud {
         } else if (remaining > 0) {
             state = State.COOLDOWN;
         }
-        return new Slot(number, name, texture(entry.getIconId()), state, fraction, remaining);
+        return new Slot(number, display.name(), display.texture(), state, fraction, remaining);
     }
 
     public static String texture(String iconId) {

@@ -22,6 +22,7 @@ final class CombatHudIcons implements ResourceManagerReloadListener {
     private static final int BLUE_WEIGHT = 29;
     private static final int WEIGHT_SUM = 256;
     private final Map<Identifier, Optional<Identifier>> grayscale = new HashMap<>();
+    private final Map<String, Optional<Identifier>> sources = new HashMap<>();
 
     @Override
     public void onResourceManagerReload(ResourceManager manager) {
@@ -29,6 +30,18 @@ final class CombatHudIcons implements ResourceManagerReloadListener {
         var textures = Minecraft.getInstance().getTextureManager();
         grayscale.values().forEach(value -> value.ifPresent(textures::release));
         grayscale.clear();
+        sources.clear();
+    }
+
+    Optional<Identifier> source(String texture) {
+        // 贴图路径和「资源包里有没有这张图」每次重载只查一次，不在每帧解析路径、查资源。
+        return sources.computeIfAbsent(texture, path -> {
+            Identifier source = Identifier.parse(path);
+            if (Minecraft.getInstance().getResourceManager().getResource(source).isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(source);
+        });
     }
 
     Optional<Identifier> grayscale(Identifier source) {

@@ -1,7 +1,9 @@
 package dev.kizuna.meridian.combat.fabric;
 
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import dev.kizuna.meridian.combat.core.CombatHud;
 import dev.kizuna.meridian.combat.core.CombatProtocol;
+import dev.kizuna.meridian.combat.core.KnownProjectionGate;
 import dev.kizuna.meridian.combat.core.PressLimiter;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
@@ -27,6 +29,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.HumanoidArm;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,6 +49,9 @@ public final class CombatFabric implements ModInitializer {
     private final Set<UUID> pendingKnown = new HashSet<>();
     private final Set<UUID> pausedKnown = new HashSet<>();
     private final Set<UUID> reportedFailures = new HashSet<>();
+    private final KnownProjectionGate gate = new KnownProjectionGate();
+    // 已学投影专用的宿主目录：归属路由和轻量读数要跨 tick 留着，不能像施放那样每次新建。
+    private TechniqueHostDirectory knownHosts;
 
     @Override
     public void onInitialize() {
@@ -81,6 +87,10 @@ public final class CombatFabric implements ModInitializer {
         // 连接结束同时清理限流、投影与暂停状态，重登重新询问身体宿主。
         limiter.disconnect(uuid);
         pendingKnown.remove(uuid);
+        gate.forget(uuid);
+        if (knownHosts != null) {
+            knownHosts.forget(uuid);
+        }
         sentKnown.remove(uuid);
         pausedKnown.remove(uuid);
         reportedFailures.remove(uuid);
@@ -90,6 +100,8 @@ public final class CombatFabric implements ModInitializer {
         // 停服不保留旧连接的同步状态。
         limiter.clear();
         pendingKnown.clear();
+        gate.clear();
+        knownHosts = null;
         sentKnown.clear();
         pausedKnown.clear();
         reportedFailures.clear();
@@ -134,14 +146,24 @@ public final class CombatFabric implements ModInitializer {
     }
 
     private void flushKnown(MinecraftServer server) {
-        // 每五 tick 刷新冷却和绑定，内容相同则不重复发送；学会事件仍在下一 tick 推送。
+        // 每五 tick 看一眼身体的轻量读数，身体没变就不重算；学会事件仍在下一 tick 推送。
+        // 宿主答不出轻量读数时照旧每五 tick 取一次身体，内容相同则不重复发送。
+        if (knownHosts == null) {
+            knownHosts = new TechniqueHostDirectory(FabricLoader.getInstance()
+                    .getEntrypoints(TechniqueHostEntrypoint.ENTRYPOINT_ID, TechniqueHostEntrypoint.class));
+        }
+        knownHosts.tick();
         if (server.getTickCount() % REFRESH_TICKS == 0) {
-            server.getPlayerList().getPlayers().forEach(player -> pendingKnown.add(player.getUUID()));
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                if (gate.due(player.getUUID(), reading(player))) {
+                    pendingKnown.add(player.getUUID());
+                }
+            }
         }
         if (pendingKnown.isEmpty()) {
             return;
         }
-        var casting = casting();
+        var casting = new CombatCasting(TechniqueFabric.service(), knownHosts);
         for (UUID uuid : Set.copyOf(pendingKnown)) {
             pendingKnown.remove(uuid);
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
@@ -150,13 +172,27 @@ public final class CombatFabric implements ModInitializer {
                 continue;
             }
             try {
-                var snapshot = casting.known(uuid);
+                var snapshot = casting.known(uuid, player.level().getGameTime());
                 reportedFailures.remove(uuid);
                 sendKnown(player, snapshot);
+                // 取身体本身可能结清时间、推进版本，读数在取完之后记。
+                gate.projected(uuid, reading(player));
             } catch (RuntimeException failure) {
+                gate.forget(uuid);
                 handleKnownFailure(player, failure);
             }
         }
+    }
+
+    private KnownProjectionGate.Reading reading(ServerPlayer player) {
+        // 宿主不提供轻量读数、路由还没确认或上次取身体失败时为 null，按「可能变了」处理。
+        var stamp = knownHosts.bodyStamp(player.getUUID());
+        if (stamp.isEmpty()) {
+            return null;
+        }
+        long worldMillis = player.level().getGameTime() * CombatHud.MILLIS_PER_TICK;
+        return new KnownProjectionGate.Reading(stamp.get().revision(), stamp.get().clockMillis() - worldMillis,
+                player.getMainArm() == HumanoidArm.LEFT, TechniqueFabric.service().registry());
     }
 
     private void sendKnown(ServerPlayer player, KnownTechniques snapshot) {

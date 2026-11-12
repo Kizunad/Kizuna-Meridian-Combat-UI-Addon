@@ -5,6 +5,7 @@ import com.google.protobuf.UnknownFieldSet;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.Suggestion;
+import dev.kizuna.meridian.combat.core.CombatHud;
 import dev.kizuna.meridian.combat.core.CombatIds;
 import dev.kizuna.meridian.combat.core.CombatProtocol;
 import dev.kizuna.meridian.combat.core.PressLimiter;
@@ -173,20 +174,30 @@ public final class CombatGameTest {
 
     private static void checkCooldown(GameTestHelper context, CombatTestPlayer fixture) {
         // 起手完成后的冷却总量和剩余量必须来自身体进度。
-        context.assertTrue(latest(fixture).getCooldownRemainingMillis() == CombatTestContent.COOLDOWN_MILLIS,
-                "收势后的完整冷却未推送");
+        assertRemaining(context, fixture, CombatTestContent.COOLDOWN_MILLIS, "收势后的完整冷却未推送");
         fixture.body.advanceTo(CombatTestContent.WARMUP_MILLIS + COOLDOWN_ELAPSED);
         later(context, fixture, () -> {
             long remaining = CombatTestContent.COOLDOWN_MILLIS - COOLDOWN_ELAPSED;
-            context.assertTrue(latest(fixture).getCooldownRemainingMillis() == remaining, "冷却没有随身体时间递减");
+            assertRemaining(context, fixture, remaining, "冷却没有随身体时间递减");
             fixture.body.advanceTo(CombatTestContent.WARMUP_MILLIS + CombatTestContent.COOLDOWN_MILLIS);
             later(context, fixture, () -> checkExpiry(context, fixture));
         });
     }
 
+    private static void assertRemaining(GameTestHelper context, CombatTestPlayer fixture, long expectedMillis,
+                                        String message) {
+        // 包里是冷却结束的世界 tick。测试身体的时钟不跟世界走，每次刷新都会按当时的世界 tick 重新换算，
+        // 所以最新一包的结束 tick 减现在，和身体上的剩余量相差不超过一个刷新间隔。
+        long remainingTicks = latest(fixture).getCooldownEndTick() - context.getLevel().getGameTime();
+        long remainingMillis = remainingTicks * CombatHud.MILLIS_PER_TICK;
+        context.assertTrue(remainingMillis <= expectedMillis
+                && remainingMillis >= expectedMillis - REFRESH_TICKS * CombatHud.MILLIS_PER_TICK,
+                message + "：预期约 " + expectedMillis + "，实际 " + remainingMillis);
+    }
+
     private static void checkExpiry(GameTestHelper context, CombatTestPlayer fixture) {
         // 冷却结束后身体自然寿尽，再次投影应显示明确不可用状态。
-        context.assertTrue(latest(fixture).getCooldownRemainingMillis() == 0, "到期冷却没有清除");
+        context.assertTrue(latest(fixture).getCooldownEndTick() == 0, "到期冷却没有清除");
         long lifespanMillis = (long) CombatTestContent.LIFESPAN_SECONDS * MILLIS_PER_SECOND;
         fixture.body.advanceTo(lifespanMillis);
         later(context, fixture, () -> {

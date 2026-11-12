@@ -218,7 +218,7 @@ public final class CombatHudClientTest implements ClientModInitializer {
             profiles.set(2, "hud:cooldown", now);
             profiles.set(4, "hud:unavailable", now);
         }
-        hud.update(snapshot(), CombatHudRenderer.nowMillis());
+        hud.update(snapshot());
         if (name.equals("pressed")) {
             renderer.press(1);
         }
@@ -265,7 +265,8 @@ public final class CombatHudClientTest implements ClientModInitializer {
                 .build();
         var cooldown = available.toBuilder()
                 .setId("hud:cooldown")
-                .setCooldownRemainingMillis(COOLDOWN_MILLIS)
+                .setCooldownEndTick(Minecraft.getInstance().level.getGameTime()
+                        + COOLDOWN_MILLIS / CombatHud.MILLIS_PER_TICK)
                 .setCooldownTotalMillis(TOTAL_MILLIS)
                 .build();
         var unavailable = available.toBuilder()

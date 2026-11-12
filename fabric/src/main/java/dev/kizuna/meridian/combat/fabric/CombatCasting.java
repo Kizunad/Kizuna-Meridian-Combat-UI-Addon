@@ -39,7 +39,7 @@ public final class CombatCasting {
         return service.cast(entityUuid, request);
     }
 
-    public KnownTechniques known(UUID entityUuid) {
+    public KnownTechniques known(UUID entityUuid, long gameTick) {
         // 投影只读同一次宿主查询，不执行预施放或修改身体。
         var host = hosts.resolve(entityUuid);
         if (host.isEmpty()) {
@@ -47,7 +47,7 @@ public final class CombatCasting {
         }
         var inspection = host.get().inspect();
         var snapshot = CombatKnownProjection.snapshot(service.registry(), inspection.body(),
-                inspection.heldItems().getMainHandSide());
+                inspection.heldItems().getMainHandSide(), gameTick);
         CombatProtocol.decodeKnown(snapshot.toByteArray()); // 校验整体大小与字段，越界时拒绝发布。
         return snapshot;
     }

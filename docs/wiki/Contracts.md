@@ -30,13 +30,14 @@ message KnownTechnique {
   string id = 1;
   string name = 2;
   string icon_id = 3;
-  int64 cooldown_remaining_millis = 4;
+  reserved 4; // 原 cooldown_remaining_millis，已停用
   int64 cooldown_total_millis = 5;
   string unavailable_reason = 6;
   string description = 7;
   string volume_id = 8;
   string volume_name = 9;
   string book_name = 10;
+  int64 cooldown_end_tick = 11;
 }
 ```
 
@@ -46,7 +47,12 @@ JOIN 后排队发送完整快照；客户端晚注册接收通道时再排队补
 `presentation.display_name`、`description` 与 `icon_id`，不再将简介当作名称。
 卷与书名称来自精确引用所属的目录元数据；未分组时三个卷册字段为空。
 字段 1–6 编号保持不变，旧包省略追加字段时，窗口显示无简介、无卷分组的空态。
-每 5 tick 刷新在线玩家的冷却与 `TechniqueBinder` 绑定状态，相同快照不重复发包。
+冷却发结束时刻：`cooldown_end_tick` 是冷却结束时的世界总 tick（与客户端 `level.getGameTime()` 同一时基，由身体上的剩余毫秒向上取整换算），
+0 表示不在冷却；`cooldown_total_millis` 是功法声明的冷却，只用来画占比。客户端按自己的世界 tick 算剩余，
+身体时间和世界同步走时结束 tick 不变，冷却期间不重发列表；字段 4（发包时刻的剩余毫秒）停用并保留编号。
+每 5 tick 检查一次在线玩家：宿主答得出轻量读数（`TechniqueHostDirectory.bodyStamp`）且身体版本、
+身体时钟相对世界 tick 的偏移、主手和功法目录都没变时不重算；答不出时照旧取一次身体重算冷却与 `TechniqueBinder` 绑定状态。
+相同快照不重复发包。
 相对手臂绑定使用同一次 `Inspection.heldItems` 中的主手解剖侧，分别检查主手与副手；
 任一手位的身体绑定成功就不显示身体不可用。持物、弹药、费用与承接仍由真实施放入口校验。
 服务端仅缓存最后发送的投影用于去重，断线与停服清空；不缓存身体、不接收客户端槽位。

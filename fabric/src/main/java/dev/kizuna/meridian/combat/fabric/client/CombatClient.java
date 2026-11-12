@@ -180,7 +180,7 @@ public final class CombatClient implements ClientModInitializer {
                     .forEach(entry -> names.put(entry.getId(), entry.getName()));
             slots.updateKnown(names);
             known = snapshot;
-            hud.update(snapshot, CombatHudRenderer.nowMillis());
+            hud.update(snapshot);
         } catch (IllegalArgumentException failure) {
             slots.updateKnown(Map.of());
             known = KnownTechniques.getDefaultInstance();

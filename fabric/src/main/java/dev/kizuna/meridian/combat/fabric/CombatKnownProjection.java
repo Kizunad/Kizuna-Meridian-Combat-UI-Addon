@@ -1,5 +1,6 @@
 package dev.kizuna.meridian.combat.fabric;
 
+import dev.kizuna.meridian.combat.core.CombatHud;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import dev.kizuna.meridian.core.BodySnapshot;
@@ -23,7 +24,9 @@ final class CombatKnownProjection {
         // 投影不持有身体或客户端槽位。
     }
 
-    static KnownTechniques snapshot(TechniqueRegistry registry, BodySnapshot body, HandSide mainHandSide) {
+    /** gameTick 是玩家所在世界当前的总 tick；冷却按它换算成结束 tick，身体时间和世界同步走时这个数不变。 */
+    static KnownTechniques snapshot(TechniqueRegistry registry, BodySnapshot body, HandSide mainHandSide,
+                                    long gameTick) {
         // 每个身份只展示目录中仍存在的最高已学版本，与实际施放选择一致。
         var progress = TechniqueState.read(body);
         var definitions = new TreeMap<String, TechniqueDefinition>();
@@ -38,8 +41,13 @@ final class CombatKnownProjection {
             String id = definition.getId();
             long end = Math.max(progress.getCooldownsOrDefault(id, 0), progress.getCurveEndsOrDefault(id, 0));
             long remaining = Math.max(0, end - now);
+            long endTick = 0;
+            if (remaining > 0) {
+                // 向上取整到 tick：客户端不会比服务端先显示可用。
+                endTick = gameTick + (remaining + CombatHud.MILLIS_PER_TICK - 1) / CombatHud.MILLIS_PER_TICK;
+            }
             TechniqueFailure failure = bindingFailure(body, definition, mainHandSide);
-            result.addTechniques(entry(registry, volumes, definition, remaining, failure));
+            result.addTechniques(entry(registry, volumes, definition, endTick, failure));
         }
         return result.build();
     }
@@ -55,7 +63,7 @@ final class CombatKnownProjection {
 
     private static KnownTechnique entry(TechniqueRegistry registry,
                                         Map<TechniqueReference, TechniqueVolume> volumes,
-                                        TechniqueDefinition definition, long remaining, TechniqueFailure failure) {
+                                        TechniqueDefinition definition, long endTick, TechniqueFailure failure) {
         // 简介与名称分别来自内容声明，仅同步槽位窗口需要的显示字段。
         var presentation = definition.getPresentation();
         var result = KnownTechnique.newBuilder()
@@ -63,8 +71,8 @@ final class CombatKnownProjection {
                 .setName(presentation.getDisplayName())
                 .setDescription(presentation.getDescription())
                 .setIconId(presentation.getIconId())
-                .setCooldownRemainingMillis(remaining)
-                .setCooldownTotalMillis(Math.max(definition.getCooldownMillis(), remaining))
+                .setCooldownEndTick(endTick)
+                .setCooldownTotalMillis(definition.getCooldownMillis())
                 .setUnavailableReason(reason(failure));
         var reference = TechniqueReference.newBuilder()
                 .setId(definition.getId())

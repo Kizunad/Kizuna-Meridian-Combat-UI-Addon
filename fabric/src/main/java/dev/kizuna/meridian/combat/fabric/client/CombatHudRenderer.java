@@ -88,7 +88,8 @@ final class CombatHudRenderer {
         var matrices = context.pose();
         matrices.pushMatrix();
         matrices.translate(left, top);
-        for (var slot : hud.slots(profiles.slots(), nowMillis())) {
+        // 冷却按世界 tick 对照服务端给的结束时刻，暂停和卡顿时跟着世界一起停。
+        for (var slot : hud.slots(profiles.slots(), client.level.getGameTime())) {
             int x = (slot.number() - 1) * SLOT_PITCH;
             drawSlot(context, client, slot, x);
             String label = CombatHudLayout.keyLabel(slot.number(), keys, lastKey);
@@ -190,8 +191,9 @@ final class CombatHudRenderer {
     private void drawIcon(GuiGraphicsExtractor context, Minecraft client, CombatHud.Slot slot, int x, int y) {
         // 冷却和失败共享灰阶缓存；资源包缺图时保留短名称，空槽不进入本方法。
         if (!slot.texture().isEmpty()) {
-            var source = Identifier.parse(slot.texture());
-            if (client.getResourceManager().getResource(source).isPresent()) {
+            var found = icons.source(slot.texture());
+            if (found.isPresent()) {
+                Identifier source = found.get();
                 Identifier texture;
                 if (slot.state() != CombatHud.State.AVAILABLE) {
                     texture = icons.grayscale(source).orElse(source);

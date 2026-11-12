@@ -15,14 +15,18 @@ message KnownTechnique {
   string id = 1;
   string name = 2;
   string icon_id = 3;
-  int64 cooldown_remaining_millis = 4;
-  int64 cooldown_total_millis = 5;
+  // 4 原为发包时刻的冷却剩余毫秒：剩余量每次刷新都变，冷却期间整份列表会被反复重发，改发结束时刻后停用。
+  reserved 4;
+  reserved "cooldown_remaining_millis";
+  int64 cooldown_total_millis = 5; // 功法声明的冷却毫秒，只用来画冷却占比
   string unavailable_reason = 6;
   // 独立的简介与精确已学版本所属卷册；旧服务端省略时客户端展示空态。
   string description = 7;
   string volume_id = 8;
   string volume_name = 9;
   string book_name = 10;
+  // 冷却结束时的世界总 tick（与客户端 level.getGameTime() 同一时基），0 表示不在冷却；客户端按自己的世界时间算剩余。
+  int64 cooldown_end_tick = 11;
 }
 // 服务端解析 /meridian combat slot 后只发给执行者本人；槽位仍只写客户端本地文件，服务端不保存。
 enum SlotOperation {
