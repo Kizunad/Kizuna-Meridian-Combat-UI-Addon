@@ -26,6 +26,7 @@ import static dev.kizuna.meridian.combat.gametest.CombatGameTestTicks.DEFAULT_TI
 
 /** 专用服务端验证正式通道、公开功法服务与推送事件之间的接线。 */
 public final class CombatGameTest {
+    private static final int DETAIL_ROWS = 3;
     private static final long SYNC_TICKS = 2;
     private static final long REFRESH_TICKS = 6;
     private static final long COOLDOWN_ELAPSED = 500;
@@ -318,6 +319,11 @@ public final class CombatGameTest {
             context.assertTrue(technique.getId().equals(CombatTestContent.TECHNIQUE), "已学 ID 错误");
             context.assertTrue(technique.getName().equals("测试轻步"), "已学名称错误");
             context.assertTrue(technique.getDescription().equals("迈出轻盈的一步。"), "独立简介未同步");
+            // 功法书详情页的明细跟着同一条消息来：卷轴那三行在前，后面是境界。测试式没有槽位，所以没有部位行。
+            var details = technique.getDetailsList();
+            context.assertTrue(details.size() > DETAIL_ROWS && details.get(0).startsWith("真元：")
+                    && details.get(DETAIL_ROWS - 1).startsWith("持物："), "功法明细未同步：" + details);
+            context.assertTrue(details.contains("境界：游炁以上"), "明细里没有最低境界：" + details);
         }
         context.succeed();
     }

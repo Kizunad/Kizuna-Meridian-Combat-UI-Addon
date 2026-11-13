@@ -27,6 +27,9 @@ message KnownTechnique {
   string book_name = 10;
   // 冷却结束时的世界总 tick（与客户端 level.getGameTime() 同一时基），0 表示不在冷却；客户端按自己的世界时间算剩余。
   int64 cooldown_end_tick = 11;
+  // 功法书详情页逐行显示的明细：数值、境界、承接关系；这具身体绑得上时再加要用的经脉、筋肉、器官。
+  // 只随目录和绑定结果变，冷却走动不改它。旧服务端省略时客户端只显示简介。
+  repeated string details = 12;
 }
 // 服务端解析 /meridian combat slot 后只发给执行者本人；槽位仍只写客户端本地文件，服务端不保存。
 enum SlotOperation {

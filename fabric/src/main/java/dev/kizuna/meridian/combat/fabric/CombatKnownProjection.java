@@ -4,6 +4,7 @@ import dev.kizuna.meridian.combat.core.CombatHud;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import dev.kizuna.meridian.core.BodySnapshot;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BindingOutcome;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Hand;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HandSide;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
@@ -11,6 +12,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFail
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueVolume;
 import dev.kizuna.meridian.technique.server.TechniqueBinder;
+import dev.kizuna.meridian.technique.server.TechniqueReferenceText;
 import dev.kizuna.meridian.technique.server.TechniqueRegistry;
 import dev.kizuna.meridian.technique.server.TechniqueState;
 
@@ -46,8 +48,14 @@ final class CombatKnownProjection {
                 // 向上取整到 tick：客户端不会比服务端先显示可用。
                 endTick = gameTick + (remaining + CombatHud.MILLIS_PER_TICK - 1) / CombatHud.MILLIS_PER_TICK;
             }
-            TechniqueFailure failure = bindingFailure(body, definition, mainHandSide);
-            result.addTechniques(entry(registry, volumes, definition, endTick, failure));
+            BindingOutcome outcome = binding(body, definition, mainHandSide);
+            var entry = entry(registry, volumes, definition, endTick, outcome.getFailure());
+            entry.addAllDetails(TechniqueReferenceText.lines(registry, definition));
+            if (outcome.hasBinding()) {
+                // 绑得上才写得出用哪几条经脉、哪几块筋肉；绑不上时上面的「当前不可用」已经说了原因。
+                entry.addAllDetails(TechniqueReferenceText.modules(body, outcome.getBinding()));
+            }
+            result.addTechniques(entry.build());
         }
         return result.build();
     }
@@ -61,7 +69,7 @@ final class CombatKnownProjection {
         return result;
     }
 
-    private static KnownTechnique entry(TechniqueRegistry registry,
+    private static KnownTechnique.Builder entry(TechniqueRegistry registry,
                                         Map<TechniqueReference, TechniqueVolume> volumes,
                                         TechniqueDefinition definition, long endTick, TechniqueFailure failure) {
         // 简介与名称分别来自内容声明，仅同步槽位窗口需要的显示字段。
@@ -84,20 +92,25 @@ final class CombatKnownProjection {
             result.setVolumeName(volume.getDisplayName());
             registry.bookOf(reference).ifPresent(book -> result.setBookName(book.getDisplayName()));
         }
-        return result.build();
+        return result;
     }
 
     static TechniqueFailure bindingFailure(BodySnapshot body, TechniqueDefinition definition, HandSide mainHandSide) {
         // HUD 只投影身体能力：任一手位可绑定即可展示，实际持物仍由施放服务检查。
+        return binding(body, definition, mainHandSide).getFailure();
+    }
+
+    private static BindingOutcome binding(BodySnapshot body, TechniqueDefinition definition, HandSide mainHandSide) {
+        // 先试主手，再试副手；都绑不上时报主手的原因。
         var main = TechniqueBinder.bind(body, definition, Hand.MAIN_HAND, mainHandSide);
         if (main.hasBinding()) {
-            return TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED;
+            return main;
         }
         var off = TechniqueBinder.bind(body, definition, Hand.OFF_HAND, mainHandSide);
         if (off.hasBinding()) {
-            return TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED;
+            return off;
         }
-        return main.getFailure();
+        return main;
     }
 
     private static TechniqueDefinition newer(TechniqueDefinition first, TechniqueDefinition second) {
