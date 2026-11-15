@@ -1,5 +1,6 @@
 package dev.kizuna.meridian.combat.core;
 
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.BlockKind;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 
@@ -16,10 +17,14 @@ public final class CombatHud {
     /** 一门已学功法不随时间变的显示内容：列表到达时算好，逐帧只算冷却。 */
     private record Display(KnownTechnique entry, String name, String texture) { }
 
-    public enum State { EMPTY, UNAVAILABLE, COOLDOWN, AVAILABLE }
+    /** SHORT 是真元或力气这会儿不够：图标变灰、叠原因角标，不标红框；在冷却里时仍算 COOLDOWN，角标照叠。 */
+    public enum State { EMPTY, UNAVAILABLE, SHORT, COOLDOWN, AVAILABLE }
 
+    /**
+     * @param block 放不出来属于哪一类，决定右下角叠哪个小图标；没有时为 BLOCK_NONE
+     */
     public record Slot(int number, String name, String texture, State state,
-                       double cooldownFraction, long remainingMillis) { }
+                       double cooldownFraction, long remainingMillis, BlockKind block) { }
 
     public void update(KnownTechniques snapshot) {
         // 整份替换使切服、重学和内容移除不会沿用过期的图标与冷却。
@@ -54,11 +59,11 @@ public final class CombatHud {
     private Slot slot(int number, String id, long gameTick) {
         // 身体不可用优先显示叉号；冷却数据仍保留供恢复绑定后的下一次绘制。
         if (id.isEmpty()) {
-            return new Slot(number, "空", "", State.EMPTY, 0, 0);
+            return new Slot(number, "空", "", State.EMPTY, 0, 0, BlockKind.BLOCK_NONE);
         }
         Display display = known.get(id);
         if (display == null) {
-            return new Slot(number, "未学", "", State.UNAVAILABLE, 0, 0);
+            return new Slot(number, "未学", "", State.UNAVAILABLE, 0, 0, BlockKind.BLOCK_BODY);
         }
         KnownTechnique entry = display.entry();
         long remaining = Math.max(0, entry.getCooldownEndTick() - gameTick) * MILLIS_PER_TICK;
@@ -71,13 +76,19 @@ public final class CombatHud {
                 fraction = Math.min(1, (double) remaining / total);
             }
         }
+        BlockKind block = entry.getBlock();
+        boolean recovers = block == BlockKind.BLOCK_QI || block == BlockKind.BLOCK_EXERTION;
         State state = State.AVAILABLE;
-        if (!entry.getUnavailableReason().isEmpty()) {
+        if (!entry.getUnavailableReason().isEmpty() && !recovers) {
+            // 旧服务端只发原因文字、不发类别：照身体不可用画。
             state = State.UNAVAILABLE;
+            block = BlockKind.BLOCK_BODY;
         } else if (remaining > 0) {
             state = State.COOLDOWN;
+        } else if (recovers) {
+            state = State.SHORT;
         }
-        return new Slot(number, display.name(), display.texture(), state, fraction, remaining);
+        return new Slot(number, display.name(), display.texture(), state, fraction, remaining, block);
     }
 
     public static String texture(String iconId) {

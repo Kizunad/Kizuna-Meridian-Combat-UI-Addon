@@ -30,6 +30,15 @@ message KnownTechnique {
   // 功法书详情页逐行显示的明细：数值、境界、承接关系；这具身体绑得上时再加要用的经脉、筋肉、器官。
   // 只随目录和绑定结果变，冷却走动不改它。旧服务端省略时客户端只显示简介。
   repeated string details = 12;
+  // 现在放不出来属于哪一类，图标右下角按它叠小图标；没有（或旧服务端没发）时为 BLOCK_NONE。
+  // 真元、力气这两类会随时间自己恢复，图标只变灰不标红框。
+  BlockKind block = 13;
+}
+enum BlockKind {
+  BLOCK_NONE = 0;
+  BLOCK_BODY = 1; // 身体绑不上这一式：境界、经脉、筋骨伤残等
+  BLOCK_QI = 2; // 真元不够付
+  BLOCK_EXERTION = 3; // 筋肉或脏腑这会儿做不了这份功
 }
 // 服务端解析 /meridian combat slot 后只发给执行者本人；槽位仍只写客户端本地文件，服务端不保存。
 enum SlotOperation {

@@ -5,6 +5,7 @@ import dev.kizuna.meridian.combat.core.CombatHudFeedback;
 import dev.kizuna.meridian.combat.core.CombatHudLayout;
 import dev.kizuna.meridian.combat.core.CombatIds;
 import dev.kizuna.meridian.combat.core.CombatProfiles;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.BlockKind;
 import dev.kizuna.meridian.technique.fabric.client.TechniqueStaggerClient;
 import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
 import net.minecraft.client.KeyMapping;
@@ -30,6 +31,10 @@ final class CombatHudRenderer {
             Identifier.fromNamespaceAndPath("meridian_combat", "textures/gui/combat/slot_frames.png");
     private static final Identifier FAILURE =
             Identifier.fromNamespaceAndPath("meridian_combat", "textures/gui/combat/failure_badge.png");
+    private static final Identifier SHORT_OF_QI =
+            Identifier.fromNamespaceAndPath("meridian_combat", "textures/gui/combat/qi_badge.png");
+    private static final Identifier SHORT_OF_STRENGTH =
+            Identifier.fromNamespaceAndPath("meridian_combat", "textures/gui/combat/exertion_badge.png");
     private static final int FRAME_COUNT = 5;
     private static final int EMPTY_FRAME = 1;
     private static final int FAILED_FRAME = 2;
@@ -165,10 +170,20 @@ final class CombatHudRenderer {
                     ICON_INSET + ICON_SIZE, COOLDOWN_COLOR);
             long seconds = (slot.remainingMillis() + MILLIS_PER_SECOND - 1) / MILLIS_PER_SECOND;
             drawTimer(context, client, Long.toString(seconds), x);
-        } else if (slot.state() == CombatHud.State.UNAVAILABLE) {
-            context.blit(RenderPipelines.GUI_TEXTURED, FAILURE, x + SLOT_SIZE - BADGE_SIZE - 1, 1, 0, 0,
-                    BADGE_SIZE, BADGE_SIZE, BADGE_SIZE, BADGE_SIZE);
         }
+        if (slot.block() != BlockKind.BLOCK_NONE) {
+            // 右下角的小图标说明为什么放不出来；冷却里的也叠，冷却走完还放不出来时玩家心里有数。
+            context.blit(RenderPipelines.GUI_TEXTURED, badge(slot.block()), x + SLOT_SIZE - BADGE_SIZE - 1,
+                    SLOT_SIZE - BADGE_SIZE - 1, 0, 0, BADGE_SIZE, BADGE_SIZE, BADGE_SIZE, BADGE_SIZE);
+        }
+    }
+
+    private static Identifier badge(BlockKind block) {
+        return switch (block) {
+            case BLOCK_QI -> SHORT_OF_QI;
+            case BLOCK_EXERTION -> SHORT_OF_STRENGTH;
+            default -> FAILURE;
+        };
     }
 
     private static int frameIndex(CombatHud.State state, CombatHudFeedback.Frame feedback) {

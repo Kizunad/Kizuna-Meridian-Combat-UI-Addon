@@ -1,5 +1,6 @@
 package dev.kizuna.meridian.combat.core;
 
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.BlockKind;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import org.junit.Test;
@@ -88,6 +89,30 @@ public final class CombatHudTest {
         assertEquals("轻步", slot.name());
         assertEquals(CombatHud.State.UNAVAILABLE, slot.state());
         assertEquals(REMAINING, slot.remainingMillis());
+    }
+
+    @Test
+    public void shortOfQiOrStrengthGreysWithItsBadgeAndKeepsTheCooldown() {
+        // 真元、力气不够：不在冷却时是 SHORT（变灰、不标红框），在冷却里仍照冷却画；两种都带原因类别供叠角标。
+        var hud = new CombatHud();
+        var bindings = Collections.nCopies(CombatIds.SLOT_COUNT, ID);
+        var lacking = entry().toBuilder().setUnavailableReason("真元不济").setBlock(BlockKind.BLOCK_QI).build();
+        hud.update(snapshot(lacking));
+        var cooling = hud.slots(bindings, NOW_TICK).get(0);
+        assertEquals(CombatHud.State.COOLDOWN, cooling.state());
+        assertEquals(BlockKind.BLOCK_QI, cooling.block());
+        var ready = hud.slots(bindings, END_TICK).get(0);
+        assertEquals(CombatHud.State.SHORT, ready.state());
+        assertEquals(BlockKind.BLOCK_QI, ready.block());
+        hud.update(snapshot(lacking.toBuilder().setUnavailableReason("气力不继").setBlock(BlockKind.BLOCK_EXERTION).build()));
+        assertEquals(BlockKind.BLOCK_EXERTION, hud.slots(bindings, END_TICK).get(0).block());
+        // 身体绑不上的照旧是 UNAVAILABLE；旧服务端只发文字时也按这一类画。能放的不带类别。
+        hud.update(snapshot(entry().toBuilder().setUnavailableReason("经脉未通").build()));
+        var failed = hud.slots(bindings, END_TICK).get(0);
+        assertEquals(CombatHud.State.UNAVAILABLE, failed.state());
+        assertEquals(BlockKind.BLOCK_BODY, failed.block());
+        hud.update(snapshot(entry()));
+        assertEquals(BlockKind.BLOCK_NONE, hud.slots(bindings, END_TICK).get(0).block());
     }
 
     @Test

@@ -176,7 +176,7 @@ public final class CombatFabric implements ModInitializer {
                 reportedFailures.remove(uuid);
                 sendKnown(player, snapshot);
                 // 取身体本身可能结清时间、推进版本，读数在取完之后记。
-                gate.projected(uuid, reading(player));
+                gate.projected(uuid, reading(player), CombatKnownProjection.recovering(snapshot));
             } catch (RuntimeException failure) {
                 gate.forget(uuid);
                 handleKnownFailure(player, failure);

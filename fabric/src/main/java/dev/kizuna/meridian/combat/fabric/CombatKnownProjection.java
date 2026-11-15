@@ -1,24 +1,30 @@
 package dev.kizuna.meridian.combat.fabric;
 
 import dev.kizuna.meridian.combat.core.CombatHud;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.BlockKind;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BindingOutcome;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Hand;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HandSide;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueBinding;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueVolume;
+import dev.kizuna.meridian.technique.server.TechniqueAvailability;
 import dev.kizuna.meridian.technique.server.TechniqueBinder;
 import dev.kizuna.meridian.technique.server.TechniqueReferenceText;
 import dev.kizuna.meridian.technique.server.TechniqueRegistry;
 import dev.kizuna.meridian.technique.server.TechniqueState;
 
-import java.util.TreeMap;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.function.Predicate;
 
 /** HUD 的只读身体投影；是否真正施放仍由功法服务原子校验。 */
 final class CombatKnownProjection {
@@ -50,6 +56,12 @@ final class CombatKnownProjection {
             }
             BindingOutcome outcome = binding(body, definition, mainHandSide);
             var entry = entry(registry, volumes, definition, endTick, outcome.getFailure());
+            if (outcome.hasBinding()) {
+                BlockKind shortage = shortage(body, definition, mainHandSide);
+                entry.setBlock(shortage).setUnavailableReason(shortageText(shortage));
+            } else {
+                entry.setBlock(BlockKind.BLOCK_BODY);
+            }
             entry.addAllDetails(TechniqueReferenceText.lines(registry, definition));
             if (outcome.hasBinding()) {
                 // 绑得上才写得出用哪几条经脉、哪几块筋肉；绑不上时上面的「当前不可用」已经说了原因。
@@ -113,6 +125,56 @@ final class CombatKnownProjection {
         return main;
     }
 
+    /**
+     * 身体绑得上以后，再用和起手相同的只读预检看真元付不付得起、筋肉脏腑做不做得了这份功。
+     * 持物、承接和着地仍由施放时校验。
+     */
+    private static BlockKind shortage(BodySnapshot body, TechniqueDefinition definition, HandSide mainHandSide) {
+        var bindings = new ArrayList<TechniqueBinding>();
+        for (Hand hand : List.of(Hand.MAIN_HAND, Hand.OFF_HAND)) {
+            var outcome = TechniqueBinder.bind(body, definition, hand, mainHandSide);
+            if (outcome.hasBinding()) {
+                bindings.add(outcome.getBinding());
+            }
+        }
+        return shortage(bindings, binding -> TechniqueAvailability.affordable(body, definition, binding),
+                binding -> TechniqueAvailability.workable(body, definition, binding));
+    }
+
+    /** 两只手各自的绑定里有一个付得起也做得了，就放得出来；都不行时，有付不起真元的报真元，否则报力气。 */
+    static BlockKind shortage(List<TechniqueBinding> bindings, Predicate<TechniqueBinding> affordable,
+                              Predicate<TechniqueBinding> workable) {
+        boolean paid = true;
+        for (TechniqueBinding binding : bindings) {
+            if (!affordable.test(binding)) {
+                paid = false;
+            } else if (workable.test(binding)) {
+                return BlockKind.BLOCK_NONE;
+            }
+        }
+        if (bindings.isEmpty()) {
+            return BlockKind.BLOCK_NONE;
+        }
+        if (paid) {
+            return BlockKind.BLOCK_EXERTION;
+        }
+        return BlockKind.BLOCK_QI;
+    }
+
+    private static String shortageText(BlockKind shortage) {
+        return switch (shortage) {
+            case BLOCK_QI -> "真元不济";
+            case BLOCK_EXERTION -> "气力不继";
+            default -> "";
+        };
+    }
+
+    /** 这份投影里有没有会随时间自己恢复的不可用（真元、力气）：有的话身体读数没变也要接着重算。 */
+    static boolean recovering(KnownTechniques snapshot) {
+        return snapshot.getTechniquesList().stream().anyMatch(entry ->
+                entry.getBlock() == BlockKind.BLOCK_QI || entry.getBlock() == BlockKind.BLOCK_EXERTION);
+    }
+
     private static TechniqueDefinition newer(TechniqueDefinition first, TechniqueDefinition second) {
         // 同一身份不把目录的新版本自动授予仅学过旧版的玩家。
         if (second.getVersion() > first.getVersion()) {
@@ -122,7 +184,7 @@ final class CombatKnownProjection {
     }
 
     private static String reason(TechniqueFailure failure) {
-        // 只描述公开绑定查询能确认的失败，费用、承接和持物保留施放时的权威提示。
+        // 身体绑定这一步的失败；真元和力气见 shortage，承接和持物保留施放时的权威提示。
         return switch (failure) {
             case TECHNIQUE_FAILURE_UNSPECIFIED -> "";
             case BODY_UNAVAILABLE -> "身体不可用";

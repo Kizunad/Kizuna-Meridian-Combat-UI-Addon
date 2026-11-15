@@ -1,5 +1,8 @@
 package dev.kizuna.meridian.combat.fabric;
 
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.BlockKind;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.protocol.BodyProtobuf;
 import dev.kizuna.meridian.protocol.pb.BodyMessages;
@@ -12,6 +15,7 @@ import java.util.List;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 /** HUD 的相对手臂投影与身体失能回归，不需要游戏世界或独立身体账本。 */
 public final class CombatKnownProjectionTest {
@@ -45,6 +49,35 @@ public final class CombatKnownProjectionTest {
                 CombatKnownProjection.bindingFailure(unavailable, technique, HandSide.RIGHT));
         assertEquals(TechniqueFailure.INVALID_REQUEST,
                 CombatKnownProjection.bindingFailure(body(RIGHT), technique, HandSide.HAND_SIDE_UNSPECIFIED));
+    }
+
+    @Test
+    public void shortageNamesQiBeforeStrengthAndEitherUsableHandClearsIt() {
+        // 两只手的绑定各问一遍「付得起吗」「做得了吗」：有一只都行就不算缺；都不行时，有付不起的报真元，否则报力气。
+        TechniqueBinding main = TechniqueBinding.newBuilder().setBodyId("main").build();
+        TechniqueBinding off = TechniqueBinding.newBuilder().setBodyId("off").build();
+        var both = List.of(main, off);
+        assertEquals(BlockKind.BLOCK_NONE, CombatKnownProjection.shortage(both, binding -> true, binding -> true));
+        assertEquals(BlockKind.BLOCK_NONE, CombatKnownProjection.shortage(both, off::equals, off::equals));
+        assertEquals(BlockKind.BLOCK_QI, CombatKnownProjection.shortage(both, binding -> false, binding -> true));
+        assertEquals(BlockKind.BLOCK_QI, CombatKnownProjection.shortage(both, main::equals, binding -> false));
+        assertEquals(BlockKind.BLOCK_EXERTION, CombatKnownProjection.shortage(both, binding -> true, binding -> false));
+        assertEquals(BlockKind.BLOCK_EXERTION, CombatKnownProjection.shortage(List.of(main), binding -> true, binding -> false));
+        assertEquals(BlockKind.BLOCK_NONE, CombatKnownProjection.shortage(List.of(), binding -> false, binding -> false));
+    }
+
+    @Test
+    public void onlyQiAndStrengthShortagesKeepTheProjectionRecomputing() {
+        // 真元、力气会自己恢复，投影里有它们时要接着重算；身体绑不上的不会自己好，不用。
+        var plain = KnownTechnique.newBuilder().setId("projection_test:shot").build();
+        assertFalse(CombatKnownProjection.recovering(known(plain)));
+        assertFalse(CombatKnownProjection.recovering(known(plain.toBuilder().setBlock(BlockKind.BLOCK_BODY).build())));
+        assertTrue(CombatKnownProjection.recovering(known(plain.toBuilder().setBlock(BlockKind.BLOCK_QI).build())));
+        assertTrue(CombatKnownProjection.recovering(known(plain.toBuilder().setBlock(BlockKind.BLOCK_EXERTION).build())));
+    }
+
+    private static KnownTechniques known(KnownTechnique entry) {
+        return KnownTechniques.newBuilder().addTechniques(entry).build();
     }
 
     private static TechniqueDefinition technique() {

@@ -7,6 +7,7 @@ import dev.kizuna.meridian.combat.core.CombatHud;
 import dev.kizuna.meridian.combat.core.CombatIds;
 import dev.kizuna.meridian.combat.core.CombatProfiles;
 import dev.kizuna.meridian.combat.core.CombatSlots;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.BlockKind;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
@@ -36,6 +37,7 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * 先经服务端 /meridian combat slot 写本地配置，并确认 /meridian body status 仍由服务端执行；
+ * 接着拿真身体走一遍「真元耗尽，图标变灰带真元角标，补满又亮回来」，状态全由服务端真实推送；
  * 再以可控显示快照驱动正式渲染器，截图包含真实原版快捷栏与生存状态栏。
  */
 public final class CombatHudClientTest implements ClientModInitializer {
@@ -48,7 +50,14 @@ public final class CombatHudClientTest implements ClientModInitializer {
     private static final Path SCREENS = Path.of("../hud-screens");
     private static final Path REPORT = Path.of("../clienttest-results.txt");
     private static final List<String> CASES = List.of("four-states", "empty", "pressed", "released", "restored");
-    private static final int TOTAL_CAPTURES = CASES.size() * (FINAL_SCALE - INITIAL_SCALE + 1);
+    /** 可控快照的截图之外，真元真的耗尽时再拍一张。 */
+    private static final int TOTAL_CAPTURES = CASES.size() * (FINAL_SCALE - INITIAL_SCALE + 1) + 1;
+    private static final String DRAINED_SCREEN = "gui-real-short-qi.png";
+    /** 开脉、升真炁、全身内腔覆盖成密度 1 的真元：叩门这一式付得起。 */
+    private static final List<String> READY_COMMANDS = List.of(
+            "meridian opening complete @a all", "meridian body realm @a true_qi", "meridian qi set @a 300 all lumen 1");
+    private static final String DRAIN_COMMAND = "meridian qi set @a 0 all lumen 1";
+    private static final String REFILL_COMMAND = "meridian qi set @a 300 all lumen 1";
     private static final String TECHNIQUE = "meridian_door_breaker:knock";
     private static final Path CONFIG = FabricLoader.getInstance().getConfigDir().resolve("kizuna-meridian-combat.json");
     /** 每个指令步骤最多等 10 秒（200 tick），超时视为失败。 */
@@ -99,7 +108,7 @@ public final class CombatHudClientTest implements ClientModInitializer {
             }
             survival.join();
             if (step != CommandStep.DONE) {
-                commands(client);
+                commands(client, context);
                 return;
             }
             if (scale > FINAL_SCALE) {
@@ -144,7 +153,7 @@ public final class CombatHudClientTest implements ClientModInitializer {
         stepStartTick = ticks;
     }
 
-    private void commands(Minecraft client) throws Exception {
+    private void commands(Minecraft client, GuiGraphicsExtractor context) throws Exception {
         // 每步等上一条指令的效果落地再发下一条：先清空再设置，证明配置文件是本次写入的；
         // 最后经同一聊天指令入口发 body status，若客户端注册了 meridian 根，回复会是未知指令错误。
         if (ticks - stepStartTick > COMMAND_TIMEOUT_TICKS) {
@@ -180,10 +189,58 @@ public final class CombatHudClientTest implements ClientModInitializer {
                             && error.getKey().startsWith("command.")) {
                         throw new IllegalStateException("/meridian body status 没有被服务端执行：" + reply.getString());
                     }
+                    serverCommands(client, READY_COMMANDS, CommandStep.READY);
+                }
+            }
+            case READY -> {
+                // 这一步起槽里的状态都是服务端按真身体算出来推的：开脉补满以后叩门可用。
+                if (firstSlot(client).state() == CombatHud.State.AVAILABLE) {
+                    serverCommands(client, List.of(DRAIN_COMMAND), CommandStep.DRAINED);
+                }
+            }
+            case DRAINED -> {
+                // 真元清空：不重学、不重登，下一次例行检查就该变灰并带真元角标。
+                CombatHud.Slot slot = firstSlot(client);
+                if (slot.state() == CombatHud.State.SHORT && slot.block() == BlockKind.BLOCK_QI) {
+                    step = CommandStep.DRAINED_SHOT;
+                    stepStartTick = ticks;
+                }
+            }
+            case DRAINED_SHOT -> {
+                // 正式渲染器照真实状态画几帧，再把上一帧拍下来。
+                if (frames++ < SETTLE_FRAMES) {
+                    // 开脉升境界的聊天回显和进度提示会盖住战斗槽，拍之前清掉。
+                    client.gui.hud.getChat().clearMessages(false /* clearHistory */);
+                    client.gui.toastManager().clear();
+                    renderer.render(context);
+                    return;
+                }
+                frames = 0;
+                Path file = SCREENS.resolve(DRAINED_SCREEN);
+                Screenshot.takeScreenshot(client.gameRenderer.mainRenderTarget(), image -> save(image, file));
+                serverCommands(client, List.of(REFILL_COMMAND), CommandStep.REFILLED);
+            }
+            case REFILLED -> {
+                // 补满以后身体版本不一定变，靠「上一份里有真元不够的」这条接着重算才亮得回来。
+                if (firstSlot(client).state() == CombatHud.State.AVAILABLE) {
                     step = CommandStep.DONE;
                 }
             }
         }
+    }
+
+    private CombatHud.Slot firstSlot(Minecraft client) {
+        // 第 1 槽绑的是真学会的叩门，显示状态取正式 HUD 模型里服务端最近推来的那份。
+        return hud.slots(profiles.slots(), client.level.getGameTime()).get(0);
+    }
+
+    private void serverCommands(Minecraft client, List<String> commands, CommandStep next) {
+        // 管理指令以服务端身份执行，和管理员在控制台输入的一样。
+        var server = client.getSingleplayerServer();
+        server.submit(() -> commands.forEach(command ->
+                server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), command)));
+        step = next;
+        stepStartTick = ticks;
     }
 
     private void send(Minecraft client, String command, CommandStep next) {
@@ -217,6 +274,9 @@ public final class CombatHudClientTest implements ClientModInitializer {
             profiles.set(1, "hud:available", now);
             profiles.set(2, "hud:cooldown", now);
             profiles.set(4, "hud:unavailable", now);
+            profiles.set(5, "hud:short_qi", now);
+            profiles.set(6, "hud:short_strength", now);
+            profiles.set(7, "hud:cooling_short_qi", now);
         }
         hud.update(snapshot());
         if (name.equals("pressed")) {
@@ -273,10 +333,29 @@ public final class CombatHudClientTest implements ClientModInitializer {
                 .setId("hud:unavailable")
                 .setUnavailableReason("经脉未通")
                 .build();
+        // 真元、力气不够：图标变灰、右下角叠原因角标，不标红框；还在冷却里的照冷却画，角标照叠。
+        var shortQi = available.toBuilder()
+                .setId("hud:short_qi")
+                .setUnavailableReason("真元不济")
+                .setBlock(BlockKind.BLOCK_QI)
+                .build();
+        var shortStrength = available.toBuilder()
+                .setId("hud:short_strength")
+                .setUnavailableReason("气力不继")
+                .setBlock(BlockKind.BLOCK_EXERTION)
+                .build();
+        var coolingShortQi = cooldown.toBuilder()
+                .setId("hud:cooling_short_qi")
+                .setUnavailableReason("真元不济")
+                .setBlock(BlockKind.BLOCK_QI)
+                .build();
         return KnownTechniques.newBuilder()
                 .addTechniques(available)
                 .addTechniques(cooldown)
-                .addTechniques(unavailable)
+                .addTechniques(unavailable.toBuilder().setBlock(BlockKind.BLOCK_BODY).build())
+                .addTechniques(shortQi)
+                .addTechniques(shortStrength)
+                .addTechniques(coolingShortQi)
                 .build();
     }
 
@@ -305,6 +384,10 @@ public final class CombatHudClientTest implements ClientModInitializer {
         CLEAR,
         SET,
         STATUS,
+        READY,
+        DRAINED,
+        DRAINED_SHOT,
+        REFILLED,
         DONE
     }
 }
