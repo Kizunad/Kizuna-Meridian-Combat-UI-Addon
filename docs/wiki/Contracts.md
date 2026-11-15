@@ -38,7 +38,7 @@ message KnownTechnique {
   string volume_name = 9;
   string book_name = 10;
   int64 cooldown_end_tick = 11;
-  BlockKind block = 13; // 现在放不出的原因：BLOCK_NONE、BLOCK_BODY（身体绑不上）、BLOCK_QI（真元不够）、BLOCK_EXERTION（筋肉脏腑没力气）
+  BlockKind block = 13; // 现在放不出的原因：BLOCK_NONE、BLOCK_BODY（身体绑不上）、BLOCK_ITEM（手里的东西不对）、BLOCK_QI（真元不够）、BLOCK_EXERTION（筋肉脏腑没力气）；BLOCK_BUSY（正在放别的式）服务端不发，客户端本地标
 }
 ```
 
@@ -55,10 +55,15 @@ JOIN 后排队发送完整快照；客户端晚注册接收通道时再排队补
 身体时钟相对世界 tick 的偏移、主手和功法目录都没变时不重算；答不出时照旧取一次身体重算冷却与 `TechniqueBinder` 绑定状态。
 相同快照不重复发包。
 相对手臂绑定使用同一次 `Inspection.heldItems` 中的主手解剖侧，分别检查主手与副手；
-任一手位的身体绑定成功就不显示身体不可用。绑得上以后再用功法库的只读预检 `TechniqueAvailability.affordable / workable`
+任一手位的身体绑定成功就不显示身体不可用。绑得上以后用功法库的只读预检：先 `TechniqueAvailability.holdable`
+问手里的兵器、弹药、药瓶对不对（不对写 `BLOCK_ITEM`、「手里的东西不对」），再 `affordable / workable`
 问真元付不付得起、筋肉脏腑做不做得了，两只手有一只行就算行；不行时 `block` 写 `BLOCK_QI` 或 `BLOCK_EXERTION`，
 `unavailable_reason` 写「真元不济」「气力不继」。真元和力气恢复不改身体版本：上一份投影里有这两类时，读数没变也每 5 tick 重算，直到没有。
-持物、弹药、承接、正在运功仍由真实施放入口校验。
+换了手里的东西也不改身体版本：两只手各拿着什么的散列算进门控读数，变了就重算。
+承接、着地仍由真实施放入口校验；「正在运功」不走这份投影，客户端照功法库同步来的施放状态副本（`meridian_technique:cast_status`）在本地标。
+
+按键不再直接调 `TechniqueService.cast`，改走功法库的输入缓冲 `TechniqueInputBuffer.press`：按早了一点（离能出手不到配置的窗口，默认 400 毫秒）
+的键由服务端记着、到能出手的那一 tick 放；记下的那一次不发拒绝文字，等到头没放出来由功法库报原因。
 服务端仅缓存最后发送的投影用于去重，断线与停服清空；不缓存身体、不接收客户端槽位。
 非玩家实体的学会通知不发网络包。
 

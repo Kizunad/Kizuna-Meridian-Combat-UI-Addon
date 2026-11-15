@@ -8,6 +8,7 @@ import dev.kizuna.meridian.core.BodySnapshot;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.BindingOutcome;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.Hand;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HandSide;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HeldItems;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueBinding;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
@@ -33,9 +34,10 @@ final class CombatKnownProjection {
     }
 
     /** gameTick 是玩家所在世界当前的总 tick；冷却按它换算成结束 tick，身体时间和世界同步走时这个数不变。 */
-    static KnownTechniques snapshot(TechniqueRegistry registry, BodySnapshot body, HandSide mainHandSide,
+    static KnownTechniques snapshot(TechniqueRegistry registry, BodySnapshot body, HeldItems items,
                                     long gameTick) {
         // 每个身份只展示目录中仍存在的最高已学版本，与实际施放选择一致。
+        HandSide mainHandSide = items.getMainHandSide();
         var progress = TechniqueState.read(body);
         var definitions = new TreeMap<String, TechniqueDefinition>();
         for (var learned : progress.getKnownList()) {
@@ -57,8 +59,12 @@ final class CombatKnownProjection {
             BindingOutcome outcome = binding(body, definition, mainHandSide);
             var entry = entry(registry, volumes, definition, endTick, outcome.getFailure());
             if (outcome.hasBinding()) {
-                BlockKind shortage = shortage(body, definition, mainHandSide);
-                entry.setBlock(shortage).setUnavailableReason(shortageText(shortage));
+                // 先看手里的东西对不对，再看真元和力气：兵器都没拿对时，报缺真元没有用。
+                BlockKind block = BlockKind.BLOCK_ITEM;
+                if (TechniqueAvailability.holdable(registry, definition, items)) {
+                    block = shortage(body, definition, mainHandSide);
+                }
+                entry.setBlock(block).setUnavailableReason(shortageText(block));
             } else {
                 entry.setBlock(BlockKind.BLOCK_BODY);
             }
@@ -126,8 +132,8 @@ final class CombatKnownProjection {
     }
 
     /**
-     * 身体绑得上以后，再用和起手相同的只读预检看真元付不付得起、筋肉脏腑做不做得了这份功。
-     * 持物、承接和着地仍由施放时校验。
+     * 身体绑得上、手里的东西也对以后，再用和起手相同的只读预检看真元付不付得起、筋肉脏腑做不做得了这份功。
+     * 承接和着地仍由施放时校验。
      */
     private static BlockKind shortage(BodySnapshot body, TechniqueDefinition definition, HandSide mainHandSide) {
         var bindings = new ArrayList<TechniqueBinding>();
@@ -165,6 +171,7 @@ final class CombatKnownProjection {
         return switch (shortage) {
             case BLOCK_QI -> "真元不济";
             case BLOCK_EXERTION -> "气力不继";
+            case BLOCK_ITEM -> "手里的东西不对";
             default -> "";
         };
     }
@@ -184,7 +191,7 @@ final class CombatKnownProjection {
     }
 
     private static String reason(TechniqueFailure failure) {
-        // 身体绑定这一步的失败；真元和力气见 shortage，承接和持物保留施放时的权威提示。
+        // 身体绑定这一步的失败；持物、真元和力气见 snapshot 和 shortage，承接保留施放时的权威提示。
         return switch (failure) {
             case TECHNIQUE_FAILURE_UNSPECIFIED -> "";
             case BODY_UNAVAILABLE -> "身体不可用";

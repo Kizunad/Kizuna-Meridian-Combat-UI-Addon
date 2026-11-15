@@ -10,8 +10,8 @@ public final class CombatHudLayout {
     public static final int ICON_INSET = 3;
     public static final int LABEL_Y = 24;
     public static final int WIDTH = (CombatIds.SLOT_COUNT - 1) * SLOT_PITCH + SLOT_SIZE;
-    /** 僵直提示写在槽条上边缘之上的这一行。 */
-    public static final int STAGGER_Y = -10;
+    /** 僵直提示写在槽条上边缘之上的这一行；它和槽条之间留给施放条。 */
+    public static final int STAGGER_Y = -15;
     /** 原版动作栏消息的中线离屏幕底边的距离。 */
     public static final int VANILLA_MESSAGE_OFFSET = 68;
     /** 动作栏一行连底衬在中线之下占的高度：文字从中线上 4 像素起笔、行高 9，底衬再多 2 像素。 */

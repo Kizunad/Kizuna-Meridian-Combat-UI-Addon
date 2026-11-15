@@ -39,6 +39,8 @@ enum BlockKind {
   BLOCK_BODY = 1; // 身体绑不上这一式：境界、经脉、筋骨伤残等
   BLOCK_QI = 2; // 真元不够付
   BLOCK_EXERTION = 3; // 筋肉或脏腑这会儿做不了这份功
+  BLOCK_ITEM = 4; // 手里的东西不对：没拿这一式要的兵器，或没有弹药
+  BLOCK_BUSY = 5; // 正在放别的式。服务端不发这一类，客户端照自己的施放状态副本在本地标
 }
 // 服务端解析 /meridian combat slot 后只发给执行者本人；槽位仍只写客户端本地文件，服务端不保存。
 enum SlotOperation {

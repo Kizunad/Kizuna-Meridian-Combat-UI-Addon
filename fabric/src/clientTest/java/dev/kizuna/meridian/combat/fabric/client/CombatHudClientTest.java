@@ -2,6 +2,7 @@ package dev.kizuna.meridian.combat.fabric.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.NativeImage;
+import dev.kizuna.meridian.combat.core.CombatCast;
 import dev.kizuna.meridian.combat.core.CombatConfigFile;
 import dev.kizuna.meridian.combat.core.CombatHud;
 import dev.kizuna.meridian.combat.core.CombatIds;
@@ -37,7 +38,7 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * 先经服务端 /meridian combat slot 写本地配置，并确认 /meridian body status 仍由服务端执行；
- * 接着拿真身体走一遍「真元耗尽，图标变灰带真元角标，补满又亮回来」，状态全由服务端真实推送；
+ * 接着拿真身体走一遍「空手时带兵器角标，拿上斧子可用；真元耗尽，图标变灰带真元角标，补满又亮回来」，状态全由服务端真实推送；
  * 再以可控显示快照驱动正式渲染器，截图包含真实原版快捷栏与生存状态栏。
  */
 public final class CombatHudClientTest implements ClientModInitializer {
@@ -49,13 +50,22 @@ public final class CombatHudClientTest implements ClientModInitializer {
     private static final long TOTAL_MILLIS = 5000;
     private static final Path SCREENS = Path.of("../hud-screens");
     private static final Path REPORT = Path.of("../clienttest-results.txt");
-    private static final List<String> CASES = List.of("four-states", "empty", "pressed", "released", "restored");
+    private static final List<String> CASES =
+            List.of("four-states", "empty", "pressed", "released", "restored", "casting");
+    /**
+     * 「casting」那一张用的施放：一式放到收势、还没到收招段；第 3 槽那一式的承接窗口开着，第 9 槽那一式被服务端记着。
+     * 施放条上起手、出招、收势、收招四段和两次打击、一个承接窗口都看得见。
+     */
+    private static final CombatCast CASTING = new CombatCast(2200, 800, 1400, 3000, 2600, List.of(900L, 1300L),
+            List.of(new CombatCast.Window("hud:follow", 2000, 3400)), "hud:buffered");
     /** 可控快照的截图之外，真元真的耗尽时再拍一张。 */
     private static final int TOTAL_CAPTURES = CASES.size() * (FINAL_SCALE - INITIAL_SCALE + 1) + 1;
     private static final String DRAINED_SCREEN = "gui-real-short-qi.png";
     /** 开脉、升真炁、全身内腔覆盖成密度 1 的真元：叩门这一式付得起。 */
     private static final List<String> READY_COMMANDS = List.of(
             "meridian opening complete @a all", "meridian body realm @a true_qi", "meridian qi set @a 300 all lumen 1");
+    /** 叩门要拿着斧子。 */
+    private static final String ARM_COMMAND = "item replace entity @a weapon.mainhand with minecraft:iron_axe";
     private static final String DRAIN_COMMAND = "meridian qi set @a 0 all lumen 1";
     private static final String REFILL_COMMAND = "meridian qi set @a 300 all lumen 1";
     private static final String TECHNIQUE = "meridian_door_breaker:knock";
@@ -189,11 +199,18 @@ public final class CombatHudClientTest implements ClientModInitializer {
                             && error.getKey().startsWith("command.")) {
                         throw new IllegalStateException("/meridian body status 没有被服务端执行：" + reply.getString());
                     }
-                    serverCommands(client, READY_COMMANDS, CommandStep.READY);
+                    serverCommands(client, READY_COMMANDS, CommandStep.UNARMED);
+                }
+            }
+            case UNARMED -> {
+                // 这一步起槽里的状态都是服务端按真身体算出来推的：开脉补满了，可是空着手，叩门要斧子。
+                CombatHud.Slot slot = firstSlot(client);
+                if (slot.state() == CombatHud.State.SHORT && slot.block() == BlockKind.BLOCK_ITEM) {
+                    serverCommands(client, List.of(ARM_COMMAND), CommandStep.READY);
                 }
             }
             case READY -> {
-                // 这一步起槽里的状态都是服务端按真身体算出来推的：开脉补满以后叩门可用。
+                // 拿上斧子：换手里的东西不改身体版本，照样在下一次例行检查变成可用。
                 if (firstSlot(client).state() == CombatHud.State.AVAILABLE) {
                     serverCommands(client, List.of(DRAIN_COMMAND), CommandStep.DRAINED);
                 }
@@ -277,12 +294,20 @@ public final class CombatHudClientTest implements ClientModInitializer {
             profiles.set(5, "hud:short_qi", now);
             profiles.set(6, "hud:short_strength", now);
             profiles.set(7, "hud:cooling_short_qi", now);
+            profiles.set(3, "hud:follow", now);
+            profiles.set(8, "hud:wrong_item", now);
+            profiles.set(9, "hud:buffered", now);
         }
         hud.update(snapshot());
         if (name.equals("pressed")) {
             renderer.press(1);
         }
-        renderer.render(context);
+        if (name.equals("casting")) {
+            // 正在放别的式：能放的槽变灰带沙漏，能接的槽描暖色框，记着的槽描白框，槽条上方是施放条。
+            renderer.render(context, CASTING);
+        } else {
+            renderer.render(context);
+        }
         if (caseIndex < 2 && ++frames < SETTLE_FRAMES) {
             return;
         }
@@ -349,7 +374,16 @@ public final class CombatHudClientTest implements ClientModInitializer {
                 .setUnavailableReason("真元不济")
                 .setBlock(BlockKind.BLOCK_QI)
                 .build();
+        // 手里的东西不对：和真元、力气不够一样变灰，角标是一把小剑。
+        var wrongItem = available.toBuilder()
+                .setId("hud:wrong_item")
+                .setUnavailableReason("手里的东西不对")
+                .setBlock(BlockKind.BLOCK_ITEM)
+                .build();
         return KnownTechniques.newBuilder()
+                .addTechniques(available.toBuilder().setId("hud:follow").build())
+                .addTechniques(available.toBuilder().setId("hud:buffered").build())
+                .addTechniques(wrongItem)
                 .addTechniques(available)
                 .addTechniques(cooldown)
                 .addTechniques(unavailable.toBuilder().setBlock(BlockKind.BLOCK_BODY).build())
@@ -384,6 +418,7 @@ public final class CombatHudClientTest implements ClientModInitializer {
         CLEAR,
         SET,
         STATUS,
+        UNARMED,
         READY,
         DRAINED,
         DRAINED_SHOT,

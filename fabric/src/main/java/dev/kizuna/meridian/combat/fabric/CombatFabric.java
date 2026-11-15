@@ -14,6 +14,7 @@ import dev.kizuna.meridian.fabric.MeridianCommands;
 import dev.kizuna.meridian.fabric.ProtobufChannel;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueInputBuffer;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
 import dev.kizuna.meridian.technique.server.TechniqueHostDirectory;
 import dev.kizuna.meridian.technique.server.TechniqueHostEntrypoint;
@@ -30,6 +31,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.item.ItemStack;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +39,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -128,8 +131,10 @@ public final class CombatFabric implements ModInitializer {
         }
         UUID playerUuid = player.getUUID();
         try {
-            var outcome = casting().cast(playerUuid, press);
-            if (outcome.getFailure() != TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED) {
+            // 按早了一点的键由功法库记一小会儿、到能出手时放；记下了就先不报拒绝原因，等到头没放出来它自己会报。
+            var pressed = TechniqueInputBuffer.press(player, casting().request(playerUuid, press));
+            var outcome = pressed.outcome();
+            if (outcome.getFailure() != TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED && !pressed.buffered()) {
                 player.sendSystemMessage(Component.literal(outcome.getReason()), true /* overlay */);
             }
         } catch (RuntimeException failure) {
@@ -191,8 +196,11 @@ public final class CombatFabric implements ModInitializer {
             return null;
         }
         long worldMillis = player.level().getGameTime() * CombatHud.MILLIS_PER_TICK;
+        // 换了手里的东西不改身体版本：两只手各拿着什么也算进读数，「兵器不对」的角标才跟得上。
+        int held = Objects.hash(ItemStack.hashItemAndComponents(player.getMainHandItem()),
+                ItemStack.hashItemAndComponents(player.getOffhandItem()));
         return new KnownProjectionGate.Reading(stamp.get().revision(), stamp.get().clockMillis() - worldMillis,
-                player.getMainArm() == HumanoidArm.LEFT, TechniqueFabric.service().registry());
+                player.getMainArm() == HumanoidArm.LEFT, held, TechniqueFabric.service().registry());
     }
 
     private void sendKnown(ServerPlayer player, KnownTechniques snapshot) {

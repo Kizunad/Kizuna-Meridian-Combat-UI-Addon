@@ -1,5 +1,7 @@
 package dev.kizuna.meridian.combat.fabric.client;
 
+import dev.kizuna.meridian.combat.core.CombatCast;
+import dev.kizuna.meridian.combat.core.CombatCastBar;
 import dev.kizuna.meridian.combat.core.CombatHud;
 import dev.kizuna.meridian.combat.core.CombatHudFeedback;
 import dev.kizuna.meridian.combat.core.CombatHudLayout;
@@ -35,6 +37,10 @@ final class CombatHudRenderer {
             Identifier.fromNamespaceAndPath("meridian_combat", "textures/gui/combat/qi_badge.png");
     private static final Identifier SHORT_OF_STRENGTH =
             Identifier.fromNamespaceAndPath("meridian_combat", "textures/gui/combat/exertion_badge.png");
+    private static final Identifier WRONG_ITEM =
+            Identifier.fromNamespaceAndPath("meridian_combat", "textures/gui/combat/item_badge.png");
+    private static final Identifier BUSY =
+            Identifier.fromNamespaceAndPath("meridian_combat", "textures/gui/combat/busy_badge.png");
     private static final int FRAME_COUNT = 5;
     private static final int EMPTY_FRAME = 1;
     private static final int FAILED_FRAME = 2;
@@ -52,6 +58,18 @@ final class CombatHudRenderer {
     private static final int KEY_COLOR = 0xffaaaaaa;
     private static final int OUTLINE_COLOR = 0xff000000;
     private static final int COOLDOWN_COLOR = 0x99000000;
+    /** 施放条：槽条正上方三像素高的一条，起手、出招、收势、收招段四种灰度，中性配色。 */
+    private static final int CAST_BAR_Y = -4;
+    private static final int CAST_BAR_HEIGHT = 3;
+    private static final int CAST_BAR_BACK = 0x99000000;
+    private static final int WARMUP_COLOR = 0xff8c8c8c;
+    private static final int ACTIVE_COLOR = 0xfff0f0f0;
+    private static final int RECOVERY_COLOR = 0xff5c5c5c;
+    private static final int WIND_DOWN_COLOR = 0xff343434;
+    /** 承接窗口和「现在能接」的槽框用同一个暖色，记着的按键用白色。 */
+    private static final int FOLLOW_UP_COLOR = 0xffe8d27a;
+    private static final int BUFFERED_COLOR = 0xffffffff;
+    private static final int CURSOR_COLOR = 0xffffffff;
     private static final long NANOS_PER_MILLI = 1_000_000;
     private static final long MILLIS_PER_SECOND = 1000;
     private final CombatHud hud;
@@ -80,6 +98,11 @@ final class CombatHudRenderer {
     }
 
     void render(GuiGraphicsExtractor context) {
+        // 没有施放状态可读的调用方（只画槽）照「没在施放」画。
+        render(context, CombatCast.NONE);
+    }
+
+    void render(GuiGraphicsExtractor context, CombatCast cast) {
         // 生存模式避开血条与护甲，多排生命值时跟随原版行间距上移。
         var client = Minecraft.getInstance();
         if (client.player == null || client.gui.hud.isHidden()) {
@@ -94,7 +117,8 @@ final class CombatHudRenderer {
         matrices.pushMatrix();
         matrices.translate(left, top);
         // 冷却按世界 tick 对照服务端给的结束时刻，暂停和卡顿时跟着世界一起停。
-        for (var slot : hud.slots(profiles.slots(), client.level.getGameTime())) {
+        List<CombatHud.Slot> slots = hud.slots(profiles.slots(), client.level.getGameTime(), cast);
+        for (var slot : slots) {
             int x = (slot.number() - 1) * SLOT_PITCH;
             drawSlot(context, client, slot, x);
             String label = CombatHudLayout.keyLabel(slot.number(), keys, lastKey);
@@ -102,9 +126,35 @@ final class CombatHudRenderer {
             context.centeredText(client.font, fittedLabel,
                     x + SLOT_SIZE / HALF, CombatHudLayout.LABEL_Y, KEY_COLOR);
         }
+        // 相邻两槽共用一条边，后画的槽框会盖住前一槽的右边：提示框等十槽都画完再描。
+        slots.forEach(slot -> drawMark(context, slot));
+        drawCastBar(context, cast);
         drawStaggers(context, client);
         matrices.popMatrix();
         feedback.advanceFrame();
+    }
+
+    private static void drawCastBar(GuiGraphicsExtractor context, CombatCast cast) {
+        // 一式占着人、或者它的承接窗口还开着的时候才画；走过的时间由一根竖线指着，打击时刻各一根短刻度。
+        if (cast.elapsedMillis() >= cast.spanMillis()) {
+            return;
+        }
+        CombatCastBar.Layout bar = CombatCastBar.layout(cast, CombatHudLayout.WIDTH);
+        int top = CAST_BAR_Y;
+        int bottom = CAST_BAR_Y + CAST_BAR_HEIGHT;
+        context.fill(0, top, CombatHudLayout.WIDTH, bottom, CAST_BAR_BACK);
+        context.fill(0, top, bar.warmupEnd(), bottom, WARMUP_COLOR);
+        context.fill(bar.warmupEnd(), top, bar.activeEnd(), bottom, ACTIVE_COLOR);
+        context.fill(bar.activeEnd(), top, Math.max(bar.activeEnd(), bar.free()), bottom, RECOVERY_COLOR);
+        context.fill(Math.max(bar.activeEnd(), bar.free()), top, bar.recoveryEnd(), bottom, WIND_DOWN_COLOR);
+        for (CombatCastBar.Span window : bar.windows()) {
+            // 承接窗口画在条的最下面一行。
+            context.fill(window.from(), bottom - 1, Math.max(window.from() + 1, window.to()), bottom, FOLLOW_UP_COLOR);
+        }
+        for (int hit : bar.hits()) {
+            context.fill(hit, top - 1, hit + 1, bottom, CURSOR_COLOR);
+        }
+        context.fill(bar.cursor(), top - 1, bar.cursor() + 1, bottom + 1, CURSOR_COLOR);
     }
 
     private static void drawStaggers(GuiGraphicsExtractor context, Minecraft client) {
@@ -182,8 +232,27 @@ final class CombatHudRenderer {
         return switch (block) {
             case BLOCK_QI -> SHORT_OF_QI;
             case BLOCK_EXERTION -> SHORT_OF_STRENGTH;
+            case BLOCK_ITEM -> WRONG_ITEM;
+            case BLOCK_BUSY -> BUSY;
             default -> FAILURE;
         };
+    }
+
+    private static void drawMark(GuiGraphicsExtractor context, CombatHud.Slot slot) {
+        // 沿槽框描一圈：暖色是这一式现在正好能接上，白色是服务端替自己记着这一式的按键。
+        if (slot.mark() == CombatHud.Mark.NONE) {
+            return;
+        }
+        int color = slot.mark() == CombatHud.Mark.BUFFERED ? BUFFERED_COLOR : FOLLOW_UP_COLOR;
+        outline(context, (slot.number() - 1) * SLOT_PITCH, 0, SLOT_SIZE, color);
+    }
+
+    private static void outline(GuiGraphicsExtractor context, int x, int y, int size, int color) {
+        // 一像素宽的方框。
+        context.fill(x, y, x + size, y + 1, color);
+        context.fill(x, y + size - 1, x + size, y + size, color);
+        context.fill(x, y + 1, x + 1, y + size - 1, color);
+        context.fill(x + size - 1, y + 1, x + size, y + size - 1, color);
     }
 
     private static int frameIndex(CombatHud.State state, CombatHudFeedback.Frame feedback) {

@@ -9,10 +9,12 @@ import java.util.UUID;
 /** 已学列表要不要重算：身体的轻量读数和上一次投影时一样，投影结果也一样，不必再向宿主取整具身体。 */
 public final class KnownProjectionGate {
     /**
-     * 一次投影所依据的读数：身体版本、身体时钟相对世界 tick 的偏移（毫秒）、是否左撇子、功法目录。
+     * 一次投影所依据的读数：身体版本、身体时钟相对世界 tick 的偏移（毫秒）、是否左撇子、两只手拿着的东西、功法目录。
      * 偏移不变说明身体时间和世界同步在走，已经发出去的冷却结束 tick 仍然成立。
+     *
+     * @param held 两只手各拿着什么的散列：换了兵器不改身体版本，但「手里的东西不对」要跟着变
      */
-    public record Reading(long revision, long clockOffsetMillis, boolean leftHanded, Object catalog) { }
+    public record Reading(long revision, long clockOffsetMillis, boolean leftHanded, int held, Object catalog) { }
 
     private final Map<UUID, Reading> projected = new HashMap<>();
     /** 上一次投影里有会随时间自己恢复的不可用（真元、力气）的玩家：恢复不改身体版本，读数没变也要重算。 */

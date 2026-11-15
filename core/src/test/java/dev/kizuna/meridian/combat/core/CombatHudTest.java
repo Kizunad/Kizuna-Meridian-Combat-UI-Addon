@@ -7,12 +7,19 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 
 import static org.junit.Assert.*;
 
 /** HUD 投影只处理显示数据，不能改变客户端已学权限或服务端施放事实。 */
 public final class CombatHudTest {
     private static final String ID = "sample:step";
+    private static final String NEXT = "sample:next";
+    private static final String HELD = "sample:held";
+    private static final long WARMUP_END = 500;
+    private static final long WINDOW_OPEN = 1000;
+    private static final long CAST_FREE = 1500;
+    private static final long CAST_END = 2000;
     private static final long NOW_TICK = 10_000;
     private static final long REMAINING = 2000;
     private static final long TOTAL = 4000;
@@ -113,6 +120,53 @@ public final class CombatHudTest {
         assertEquals(BlockKind.BLOCK_BODY, failed.block());
         hud.update(snapshot(entry()));
         assertEquals(BlockKind.BLOCK_NONE, hud.slots(bindings, END_TICK).get(0).block());
+    }
+
+    @Test
+    public void wrongHeldItemGreysWithItsOwnBadge() {
+        // 手里的东西不对和真元、力气不够一样画法：变灰、不标红框、带自己的类别。
+        var hud = new CombatHud();
+        var bindings = Collections.nCopies(CombatIds.SLOT_COUNT, ID);
+        hud.update(snapshot(entry().toBuilder().setUnavailableReason("手里的东西不对")
+                .setBlock(BlockKind.BLOCK_ITEM).build()));
+        var slot = hud.slots(bindings, END_TICK).get(0);
+        assertEquals(CombatHud.State.SHORT, slot.state());
+        assertEquals(BlockKind.BLOCK_ITEM, slot.block());
+    }
+
+    @Test
+    public void castInProgressGreysOtherSlotsAndMarksFollowUpsAndTheHeldPress() {
+        // 正在放别的式：能放的槽变灰、标「正运功中」；承接窗口开着的那一式照常亮着并标出来；
+        // 服务端替自己记着的那一式标出来；进了收招段就都不挡了。冷却里的照冷却画。
+        var hud = new CombatHud();
+        var next = entry().toBuilder().setId(NEXT).build();
+        var held = entry().toBuilder().setId(HELD).build();
+        hud.update(KnownTechniques.newBuilder().addTechniques(entry()).addTechniques(next).addTechniques(held)
+                .build());
+        var bindings = new ArrayList<>(Collections.nCopies(CombatIds.SLOT_COUNT, ""));
+        bindings.set(0, ID);
+        bindings.set(1, NEXT);
+        bindings.set(2, HELD);
+        var window = new CombatCast.Window(NEXT, WINDOW_OPEN, CAST_END);
+        var casting = new CombatCast(WINDOW_OPEN, WARMUP_END, WARMUP_END, CAST_END, CAST_FREE,
+                List.of(), List.of(window), HELD);
+        var slots = hud.slots(bindings, END_TICK, casting);
+        assertEquals(CombatHud.State.BUSY, slots.get(0).state());
+        assertEquals(BlockKind.BLOCK_BUSY, slots.get(0).block());
+        assertEquals(CombatHud.Mark.NONE, slots.get(0).mark());
+        assertEquals(CombatHud.State.AVAILABLE, slots.get(1).state());
+        assertEquals(CombatHud.Mark.FOLLOW_UP, slots.get(1).mark());
+        assertEquals(CombatHud.State.BUSY, slots.get(2).state());
+        assertEquals(CombatHud.Mark.BUFFERED, slots.get(2).mark());
+        assertEquals(CombatHud.State.COOLDOWN, hud.slots(bindings, NOW_TICK, casting).get(0).state());
+        var windingDown = new CombatCast(CAST_FREE, WARMUP_END, WARMUP_END, CAST_END, CAST_FREE,
+                List.of(), List.of(window), "");
+        var free = hud.slots(bindings, END_TICK, windingDown);
+        assertEquals(CombatHud.State.AVAILABLE, free.get(0).state());
+        assertEquals(BlockKind.BLOCK_NONE, free.get(0).block());
+        assertEquals(CombatHud.Mark.NONE, free.get(2).mark());
+        // 没在施放、只是记着按键等冷却：那一槽照样标出来。
+        assertEquals(CombatHud.Mark.BUFFERED, hud.slots(bindings, NOW_TICK, CombatCast.waiting(ID)).get(0).mark());
     }
 
     @Test

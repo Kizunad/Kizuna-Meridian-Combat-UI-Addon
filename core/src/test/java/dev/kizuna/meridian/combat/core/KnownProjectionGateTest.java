@@ -9,20 +9,22 @@ import org.junit.Test;
 
 public class KnownProjectionGateTest {
     private static final Object CATALOG = new Object();
-    private static final Reading READING = new Reading(7, 150, false, CATALOG);
+    private static final int HELD = 11;
+    private static final Reading READING = new Reading(7, 150, false, HELD, CATALOG);
 
     @Test
     public void sameReadingSkipsAndAnyChangedFieldRecomputes() {
-        // 读数四项全同才跳过；版本、时钟偏移、主手、目录任一变化都要重算。
+        // 读数五项全同才跳过；版本、时钟偏移、主手、手里的东西、目录任一变化都要重算。
         var gate = new KnownProjectionGate();
         UUID player = UUID.randomUUID();
         assertTrue(gate.due(player, READING));
         gate.projected(player, READING, false /* recovers */);
-        assertFalse(gate.due(player, new Reading(7, 150, false, CATALOG)));
-        assertTrue(gate.due(player, new Reading(8, 150, false, CATALOG)));
-        assertTrue(gate.due(player, new Reading(7, 200, false, CATALOG)));
-        assertTrue(gate.due(player, new Reading(7, 150, true, CATALOG)));
-        assertTrue(gate.due(player, new Reading(7, 150, false, new Object())));
+        assertFalse(gate.due(player, new Reading(7, 150, false, HELD, CATALOG)));
+        assertTrue(gate.due(player, new Reading(8, 150, false, HELD, CATALOG)));
+        assertTrue(gate.due(player, new Reading(7, 200, false, HELD, CATALOG)));
+        assertTrue(gate.due(player, new Reading(7, 150, true, HELD, CATALOG)));
+        assertTrue(gate.due(player, new Reading(7, 150, false, HELD + 1, CATALOG)));
+        assertTrue(gate.due(player, new Reading(7, 150, false, HELD, new Object())));
         assertTrue(gate.due(UUID.randomUUID(), READING));
     }
 

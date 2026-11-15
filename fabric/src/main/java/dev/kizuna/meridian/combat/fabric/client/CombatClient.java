@@ -95,7 +95,8 @@ public final class CombatClient implements ClientModInitializer {
         HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("meridian_combat", "hud"),
                 (context, deltaTracker) -> {
                     if (input.state() == CombatInput.State.ACTIVE) {
-                        renderer.render(context);
+                        renderer.render(context, CombatCasts.current(deltaTracker.getGameTimeDeltaPartialTick(
+                                false /* runsNormally */)));
                         renderTarget(Minecraft.getInstance(), context);
                     }
                 });

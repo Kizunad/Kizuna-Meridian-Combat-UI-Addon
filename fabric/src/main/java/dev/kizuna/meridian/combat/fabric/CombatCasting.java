@@ -25,18 +25,22 @@ public final class CombatCasting {
     }
 
     public CastOutcome cast(UUID entityUuid, TechniquePress press) {
+        // 直接向功法服务请求一次施放；玩家的按键另走输入缓冲（见 CombatFabric.process）。
+        return service.cast(entityUuid, request(entityUuid, press));
+    }
+
+    public CastRequest request(UUID entityUuid, TechniquePress press) {
         // 客户端只能指定标识与方向，身体和施放 ID 均由服务器补齐。
         String bodyId = hosts.resolve(entityUuid).map(host -> host.inspect().body().id().value())
                 .orElse(entityUuid.toString());
         TechniqueReference technique = reference(entityUuid, press.getTechniqueId());
         HorizontalDirection direction = direction(press);
-        CastRequest request = CastRequest.newBuilder()
+        return CastRequest.newBuilder()
                 .setBodyId(bodyId)
                 .setTechnique(technique)
                 .setCastId(UUID.randomUUID().toString())
                 .setDirection(direction)
                 .build();
-        return service.cast(entityUuid, request);
     }
 
     public KnownTechniques known(UUID entityUuid, long gameTick) {
@@ -47,7 +51,7 @@ public final class CombatCasting {
         }
         var inspection = host.get().inspect();
         var snapshot = CombatKnownProjection.snapshot(service.registry(), inspection.body(),
-                inspection.heldItems().getMainHandSide(), gameTick);
+                inspection.heldItems(), gameTick);
         CombatProtocol.decodeKnown(snapshot.toByteArray()); // 校验整体大小与字段，越界时拒绝发布。
         return snapshot;
     }
