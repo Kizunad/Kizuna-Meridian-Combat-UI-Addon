@@ -1,5 +1,6 @@
 schema_version: 1
 namespace: "meridian_combat_client_test"
+binding_templates { id: "human:adult" version: 1 }
 definitions {
   id: "meridian_combat_client_test:guard"
   version: 1

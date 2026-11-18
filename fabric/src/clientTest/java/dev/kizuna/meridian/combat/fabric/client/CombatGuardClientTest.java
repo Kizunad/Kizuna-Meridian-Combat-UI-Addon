@@ -8,6 +8,7 @@ import dev.kizuna.meridian.combat.core.CombatInput;
 import dev.kizuna.meridian.combat.core.CombatProfiles;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastPhase;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueEffect;
 import dev.kizuna.meridian.technique.server.TechniqueService.CastStateChanged;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.KeyboardHandler;
@@ -75,8 +76,13 @@ final class CombatGuardClientTest {
         subscribed = client.getSingleplayerServer().submit(() -> {
             var service = TechniqueFabric.service();
             service.addCastStateListener(event -> {
-                if (event.entityUuid().equals(uuid)
-                        && event.active().getRequest().getTechnique().getId().equals(GUARD)) {
+                if (!event.entityUuid().equals(uuid)) {
+                    return;
+                }
+                // 完整装配里有多式格挡。以服务端实际起式的防御效果核对按键。
+                var reference = event.active().getRequest().getTechnique();
+                var definition = service.registry().find(reference).orElseThrow();
+                if (definition.getEffectsList().stream().anyMatch(TechniqueEffect::hasGuard)) {
                     states.add(event);
                 }
             });

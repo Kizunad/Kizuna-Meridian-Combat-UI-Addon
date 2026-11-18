@@ -38,6 +38,7 @@ final class CombatTestContent {
         TechniqueCatalog catalog = TechniqueCatalog.newBuilder()
                 .setSchemaVersion(1)
                 .setNamespace("combat_test")
+                .addBindingTemplates(templateReference())
                 .addDefinitions(first)
                 .addDefinitions(newer)
                 .addDefinitions(other)

@@ -41,7 +41,7 @@ final class CombatKnownProjection {
         HandSide mainHandSide = items.getMainHandSide();
         var progress = TechniqueState.read(body);
         var definitions = new TreeMap<String, TechniqueDefinition>();
-        for (var reference : TechniqueKnowledge.references(registry, progress)) {
+        for (var reference : TechniqueKnowledge.references(registry, body)) {
             registry.find(reference).ifPresent(definition -> definitions.merge(
                     definition.getId(), definition, CombatKnownProjection::newer));
         }
