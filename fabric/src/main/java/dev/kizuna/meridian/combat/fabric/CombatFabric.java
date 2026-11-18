@@ -10,12 +10,14 @@ import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotCommand;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotOperation;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniqueRelease;
 import dev.kizuna.meridian.fabric.MeridianCommands;
 import dev.kizuna.meridian.fabric.ProtobufChannel;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueInputBuffer;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
 import dev.kizuna.meridian.technique.server.TechniqueHostDirectory;
 import dev.kizuna.meridian.technique.server.TechniqueHostEntrypoint;
 import dev.kizuna.meridian.technique.server.TechniqueErrors;
@@ -30,6 +32,7 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.network.ServerGamePacketListenerImpl;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.item.ItemStack;
 import org.slf4j.Logger;
@@ -49,6 +52,7 @@ public final class CombatFabric implements ModInitializer {
     private static final int REFRESH_TICKS = 5;
     private final Map<UUID, KnownTechniques> sentKnown = new HashMap<>();
     private final PressLimiter limiter = new PressLimiter();
+    private final Map<ServerGamePacketListenerImpl, CombatGuardSession> guards = new HashMap<>();
     private final Set<UUID> pendingKnown = new HashSet<>();
     private final Set<UUID> pausedKnown = new HashSet<>();
     private final Set<UUID> reportedFailures = new HashSet<>();
@@ -61,11 +65,14 @@ public final class CombatFabric implements ModInitializer {
         // JOIN 延后一 tick 推送，保证各宿主均完成玩家认领。
         ServerPlayNetworking.registerGlobalReceiver(CombatChannels.PRESS.type(),
                 (payload, context) -> receive(context.player(), payload));
+        ServerPlayNetworking.registerGlobalReceiver(CombatChannels.RELEASE.type(),
+                (payload, context) -> release(context.player(), payload));
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             UUID uuid = handler.player.getUUID();
             pausedKnown.remove(uuid);
             reportedFailures.remove(uuid);
             pendingKnown.add(uuid);
+            guards.put(handler, new CombatGuardSession());
         });
         ClientboundPlayChannelEvents.REGISTER.register((handler, sender, server, channels) -> {
             if (channels.contains(CombatChannels.KNOWN.type().id())) {
@@ -74,8 +81,11 @@ public final class CombatFabric implements ModInitializer {
             }
         });
         TechniqueFabric.KNOWN_CHANGED.register((entityUuid, known) -> pendingKnown.add(entityUuid));
+        TechniqueFabric.SERVICE_STARTED.register(service -> service.addCastEndListener(ended ->
+                guards.values().forEach(session -> session.ended(ended.castId()))));
         ServerTickEvents.END_SERVER_TICK.register(this::flushKnown);
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+            guards.remove(handler);
             disconnect(handler.player.getUUID());
         });
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
@@ -102,6 +112,7 @@ public final class CombatFabric implements ModInitializer {
     private void clearSessions() {
         // 停服不保留旧连接的同步状态。
         limiter.clear();
+        guards.clear();
         pendingKnown.clear();
         gate.clear();
         knownHosts = null;
@@ -118,7 +129,7 @@ public final class CombatFabric implements ModInitializer {
         process(player, payload.bytes());
     }
 
-    public static void process(ServerPlayer player, byte[] payload) {
+    private void process(ServerPlayer player, byte[] payload) {
         // 解码和功法服务均在服务端线程调用，非法字节直接丢弃。
         TechniquePress press;
         try {
@@ -131,8 +142,17 @@ public final class CombatFabric implements ModInitializer {
         }
         UUID playerUuid = player.getUUID();
         try {
+            var casting = casting();
+            var request = casting.request(playerUuid, press);
+            if (casting.guard(request)) {
+                pressGuard(player, press.getPressId(), request);
+                return;
+            }
+            if (press.getPressId() != 0) {
+                return;
+            }
             // 按早了一点的键由功法库记一小会儿、到能出手时放；记下了就先不报拒绝原因，等到头没放出来它自己会报。
-            var pressed = TechniqueInputBuffer.press(player, casting().request(playerUuid, press));
+            var pressed = TechniqueInputBuffer.press(player, request);
             var outcome = pressed.outcome();
             if (outcome.getFailure() != TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED && !pressed.buffered()) {
                 player.sendSystemMessage(Component.literal(outcome.getReason()), true /* overlay */);
@@ -140,6 +160,51 @@ public final class CombatFabric implements ModInitializer {
         } catch (RuntimeException failure) {
             LOGGER.warn("战斗施放失败：{}", playerUuid, failure);
             player.sendSystemMessage(Component.literal("当前无法施放功法"), true /* overlay */);
+        }
+    }
+
+    private void pressGuard(ServerPlayer player, int pressId, CastRequest request) {
+        // 守式直接尝试一次；既不排队，也不清掉已经等待的普通式。
+        var session = guards.get(player.connection);
+        if (session == null || !session.accept(pressId)) {
+            return;
+        }
+        var outcome = TechniqueFabric.service().cast(player.getUUID(), request);
+        if (outcome.getFailure() == TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED) {
+            session.started(pressId, request);
+        } else {
+            player.sendSystemMessage(Component.literal(outcome.getReason()), true /* overlay */);
+        }
+    }
+
+    private void release(ServerPlayer player, ProtobufChannel.Payload payload) {
+        // 松开不占用按下额度，无匹配身份时不查询宿主，也不修改其他按键的缓冲。
+        if (player.hasDisconnected() || !CombatChannels.RELEASE.accepts(payload)) {
+            return;
+        }
+        TechniqueRelease release;
+        try {
+            release = CombatProtocol.decodeRelease(payload.bytes());
+        } catch (IllegalArgumentException invalid) {
+            return;
+        }
+        try {
+            var session = guards.get(player.connection);
+            if (session == null) {
+                return;
+            }
+            var request = session.release(release.getPressId());
+            if (request == null) {
+                return;
+            }
+            UUID uuid = player.getUUID();
+            TechniqueInputBuffer.clear(uuid, request.getCastId());
+            var outcome = TechniqueFabric.service().endActive(uuid, request);
+            if (outcome.getFailure() != TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED) {
+                player.sendSystemMessage(Component.literal(outcome.getReason()), true /* overlay */);
+            }
+        } catch (RuntimeException failure) {
+            LOGGER.warn("战斗收势失败：{}", player.getUUID(), failure);
         }
     }
 
@@ -263,6 +328,7 @@ public final class CombatFabric implements ModInitializer {
             }
             KnownTechniques known = sentKnown.getOrDefault(player.getUUID(), KnownTechniques.getDefaultInstance());
             return known.getTechniquesList().stream()
+                    .filter(entry -> !entry.getGuard())
                     .map(KnownTechnique::getId)
                     .filter(id -> id.startsWith(prefix))
                     .sorted()

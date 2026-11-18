@@ -16,6 +16,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueRefe
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueVolume;
 import dev.kizuna.meridian.technique.server.TechniqueAvailability;
 import dev.kizuna.meridian.technique.server.TechniqueBinder;
+import dev.kizuna.meridian.technique.server.TechniqueKnowledge;
 import dev.kizuna.meridian.technique.server.TechniqueReferenceText;
 import dev.kizuna.meridian.technique.server.TechniqueRegistry;
 import dev.kizuna.meridian.technique.server.TechniqueState;
@@ -36,12 +37,12 @@ final class CombatKnownProjection {
     /** gameTick 是玩家所在世界当前的总 tick；冷却按它换算成结束 tick，身体时间和世界同步走时这个数不变。 */
     static KnownTechniques snapshot(TechniqueRegistry registry, BodySnapshot body, HeldItems items,
                                     long gameTick) {
-        // 每个身份只展示目录中仍存在的最高已学版本，与实际施放选择一致。
+        // 每个身份只展示目录中仍存在的最高已学或天生版本，与实际施放选择一致。
         HandSide mainHandSide = items.getMainHandSide();
         var progress = TechniqueState.read(body);
         var definitions = new TreeMap<String, TechniqueDefinition>();
-        for (var learned : progress.getKnownList()) {
-            registry.find(learned.getTechnique()).ifPresent(definition -> definitions.merge(
+        for (var reference : TechniqueKnowledge.references(registry, progress)) {
+            registry.find(reference).ifPresent(definition -> definitions.merge(
                     definition.getId(), definition, CombatKnownProjection::newer));
         }
         var result = KnownTechniques.newBuilder();
@@ -99,6 +100,7 @@ final class CombatKnownProjection {
                 .setIconId(presentation.getIconId())
                 .setCooldownEndTick(endTick)
                 .setCooldownTotalMillis(definition.getCooldownMillis())
+                .setGuard(definition.getEffectsList().stream().anyMatch(effect -> effect.hasGuard()))
                 .setUnavailableReason(reason(failure));
         var reference = TechniqueReference.newBuilder()
                 .setId(definition.getId())

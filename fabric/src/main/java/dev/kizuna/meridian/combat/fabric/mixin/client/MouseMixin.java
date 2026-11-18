@@ -17,11 +17,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /** 保留原版鼠标预处理，仅替换越肩模式的角度接收者。 */
 @Mixin(MouseHandler.class)
 abstract class MouseMixin {
-    @Inject(method = "onButton", at = @At("HEAD"))
+    @Inject(method = "onButton", at = @At("HEAD"), cancellable = true)
     private void combat$buttonReleased(long window, MouseButtonInfo button, int action, CallbackInfo callback) {
         // 原版控制页允许绑定鼠标键，其释放与键盘使用同一去重边界。
-        if (action == GLFW.GLFW_RELEASE && window == Minecraft.getInstance().getWindow().handle()) {
-            CombatClient.releaseSettingsKey(InputConstants.Type.MOUSE.getOrCreate(button.button()));
+        if (window != Minecraft.getInstance().getWindow().handle()) {
+            return;
+        }
+        var key = InputConstants.Type.MOUSE.getOrCreate(button.button());
+        if (action == GLFW.GLFW_RELEASE) {
+            CombatClient.releaseSettingsKey(key);
+        }
+        if (CombatClient.guardKey(key, action)) {
+            callback.cancel();
         }
     }
 

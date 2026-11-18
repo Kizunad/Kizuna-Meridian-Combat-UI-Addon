@@ -1,6 +1,9 @@
 {
   "key.category.meridian_combat.general": "经脉战斗",
   "key.meridian_combat.stance": "战斗架势",
+  "key.meridian_combat.guard": "格挡（按住）",
+  "message.meridian_combat.guard_unavailable": "眼下没有能用来招架的式",
+  "message.meridian_combat.guard_slot": "格挡用它自己的键，不放进槽里",
   "key.meridian_combat.slot_ten": "战斗架势第 10 槽",
   "key.meridian_combat.view": "切换架势视角",
   "key.meridian_combat.lock_view": "战斗视角与人物联动",

@@ -17,6 +17,22 @@ public final class CombatCastBarTest {
     private static final long HIT = 750;
     private static final String NEXT = "sample:next";
     private static final String OTHER = "sample:other";
+    private static final long LONG_HOLD = 90_000_000;
+
+    @Test
+    public void unknownEndStaysBusyWithoutInventingATimeline() {
+        // 零结束边界表示未知，不表示空闲；即使守很久也不显示假的长条。
+        var guard = new CombatCast(LONG_HOLD, WARMUP_END, 0, 0, 0, List.of(), List.of(), "",
+                CombatCast.EndTimes.UNKNOWN);
+        assertTrue(guard.casting());
+        assertTrue(guard.busy(OTHER));
+        assertFalse(guard.followUpOpen(OTHER));
+        assertEquals(0, guard.spanMillis());
+        var recovering = new CombatCast(FREE - 1, WARMUP_END, ACTIVE_END, RECOVERY_END, RECOVERY_END,
+                List.of(), List.of(), "");
+        assertTrue(recovering.busy(OTHER));
+        assertEquals(RECOVERY_END, recovering.spanMillis());
+    }
 
     @Test
     public void layoutMapsEveryMomentOntoTheBarInProportion() {

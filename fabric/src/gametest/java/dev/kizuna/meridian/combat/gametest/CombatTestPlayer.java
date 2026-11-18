@@ -61,6 +61,11 @@ final class CombatTestPlayer implements AutoCloseable {
         send(CombatChannels.PRESS.payload(bytes));
     }
 
+    void release(byte[] bytes) {
+        // 独立松开通道走真实网络接收器，不与按下共享限流。
+        send(CombatChannels.RELEASE.payload(bytes));
+    }
+
     void learn() {
         // 只学旧版本，目录中的新版不能被客户端 ID 自动授予。
         TechniqueReference reference = TechniqueReference.newBuilder()

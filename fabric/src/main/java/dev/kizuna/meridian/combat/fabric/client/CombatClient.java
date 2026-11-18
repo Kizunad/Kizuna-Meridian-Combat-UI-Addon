@@ -58,6 +58,7 @@ public final class CombatClient implements ClientModInitializer {
     private KeyMapping viewKey;
     private KeyMapping lockViewKey;
     private KeyMapping faceTargetKey;
+    private CombatGuardInput guard;
     private boolean lockHeld;
     private boolean targetHeld;
     private final CombatScreenInput settingsInput = new CombatScreenInput();
@@ -83,6 +84,7 @@ public final class CombatClient implements ClientModInitializer {
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, KEY_CATEGORY));
         faceTargetKey = KeyMappingHelper.registerKeyMapping(new KeyMapping("key.meridian_combat.face_target",
                 InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_UNKNOWN, KEY_CATEGORY));
+        guard = new CombatGuardInput(KEY_CATEGORY, input::state, () -> known);
         instance = this;
         CombatSettingsAccess.initialize(this);
         ClientTickEvents.START_CLIENT_TICK.register(this::tick);
@@ -133,6 +135,7 @@ public final class CombatClient implements ClientModInitializer {
 
     private void join(Minecraft client) {
         // 使用集成服务器的实际目录名，避免重命名存档显示名称后换档。
+        guard.disconnect();
         slots.updateKnown(Map.of());
         hud.clear();
         known = KnownTechniques.getDefaultInstance();
@@ -157,6 +160,7 @@ public final class CombatClient implements ClientModInitializer {
         known = KnownTechniques.getDefaultInstance();
         connection = CombatSlotAccess.Connection.DISCONNECTED;
         configurationKeys.clear();
+        guard.disconnect();
         publishSlots();
         CombatInput.State before = input.state();
         input.reconcile(CombatInput.Availability.DISCONNECTED);
@@ -178,6 +182,7 @@ public final class CombatClient implements ClientModInitializer {
             var names = new LinkedHashMap<String, String>();
             var snapshot = CombatProtocol.decodeKnown(payload);
             snapshot.getTechniquesList()
+                    .stream().filter(entry -> !entry.getGuard())
                     .forEach(entry -> names.put(entry.getId(), entry.getName()));
             slots.updateKnown(names);
             known = snapshot;
@@ -232,6 +237,11 @@ public final class CombatClient implements ClientModInitializer {
         var client = Minecraft.getInstance();
         try {
             requireConnection();
+            if (known.getTechniquesList().stream()
+                    .anyMatch(entry -> entry.getId().equals(techniqueId) && entry.getGuard())) {
+                throw new IllegalArgumentException(
+                        Component.translatable("message.meridian_combat.guard_slot").getString());
+            }
             slots.set(number, techniqueId, Instant.now());
             var result = save(client, "已设置第 " + number + " 槽");
             publishSlots();
@@ -296,6 +306,7 @@ public final class CombatClient implements ClientModInitializer {
             toggle(client, availability, screen);
         }
         notifyStance(before);
+        guard.reconcile(client);
         consumeViewKeys(client, screen);
         consumeSettingsKeys(client);
         if (input.consumesHotbar(availability, screen)) {
@@ -387,6 +398,20 @@ public final class CombatClient implements ClientModInitializer {
         }
         if (owner.faceTargetKey.matches(key)) {
             owner.targetHeld = false;
+        }
+    }
+
+    public static boolean guardKey(InputConstants.Key key, int action) {
+        // 键盘和鼠标回调进入同一条边沿路径。
+        var owner = instance;
+        return owner != null && owner.guard.keyEvent(key, action);
+    }
+
+    public static void releaseGuard() {
+        // 屏幕与焦点回调即时松开，不等下一 tick，防止开关发生在同一帧而丢边沿。
+        var owner = instance;
+        if (owner != null) {
+            owner.guard.cancel();
         }
     }
 

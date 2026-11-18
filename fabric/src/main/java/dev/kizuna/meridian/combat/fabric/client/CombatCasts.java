@@ -17,11 +17,15 @@ final class CombatCasts {
             return CombatCast.waiting(TechniqueCastStatusClient.buffered());
         }
         CastStatus status = current.get().status();
+        CombatCast.EndTimes endTimes = CombatCast.EndTimes.KNOWN;
+        if (status.getEndTimesUnknown()) {
+            endTimes = CombatCast.EndTimes.UNKNOWN;
+        }
         var windows = status.getFollowUpsList().stream()
                 .map(hint -> new CombatCast.Window(hint.getTechniqueId(), hint.getOpenMillis(), hint.getCloseMillis()))
                 .toList();
         return new CombatCast((long) current.get().elapsedMillis(), status.getWarmupEndMillis(),
                 status.getActiveEndMillis(), status.getRecoveryEndMillis(), status.getFreeMillis(),
-                status.getHitMillisList(), windows, status.getBufferedTechniqueId());
+                status.getHitMillisList(), windows, status.getBufferedTechniqueId(), endTimes);
     }
 }

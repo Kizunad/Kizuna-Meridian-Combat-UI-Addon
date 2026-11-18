@@ -5,6 +5,7 @@ import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastOutcome;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ActiveDuration;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HorizontalDirection;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import dev.kizuna.meridian.technique.server.TechniqueHostDirectory;
@@ -25,7 +26,7 @@ public final class CombatCasting {
     }
 
     public CastOutcome cast(UUID entityUuid, TechniquePress press) {
-        // 直接向功法服务请求一次施放；玩家的按键另走输入缓冲（见 CombatFabric.process）。
+        // 直接向功法服务请求一次施放；只有普通玩家按键另走输入缓冲。
         return service.cast(entityUuid, request(entityUuid, press));
     }
 
@@ -43,6 +44,14 @@ public final class CombatCasting {
                 .build();
     }
 
+    public boolean guard(CastRequest request) {
+        // 目录已校验持续式必须有唯一 Guard，不从客户端标志推断权限。
+        return service.registry().find(request.getTechnique())
+                .map(definition -> definition.getPhases().getActiveDuration()
+                        == ActiveDuration.ACTIVE_DURATION_UNTIL_RELEASE)
+                .orElse(false);
+    }
+
     public KnownTechniques known(UUID entityUuid, long gameTick) {
         // 投影只读同一次宿主查询，不执行预施放或修改身体。
         var host = hosts.resolve(entityUuid);
@@ -57,7 +66,7 @@ public final class CombatCasting {
     }
 
     private TechniqueReference reference(UUID entityUuid, String id) {
-        // 多版本共存时选目录中仍存在的最高已学版本，不能把旧知识升级为新权限。
+        // 多版本共存时选目录中仍存在的最高已学或天生版本，不能把旧学习记录升级为新权限。
         var registry = service.registry();
         var learned = service.known(entityUuid).stream()
                 .map(TechniqueService.KnownEntry::technique)

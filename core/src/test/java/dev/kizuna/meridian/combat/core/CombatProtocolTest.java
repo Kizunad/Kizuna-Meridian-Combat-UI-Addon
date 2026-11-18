@@ -3,6 +3,8 @@ package dev.kizuna.meridian.combat.core;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotCommand;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotOperation;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniqueRelease;
+import com.google.protobuf.UnknownFieldSet;
 import org.junit.Test;
 
 import java.util.UUID;
@@ -11,6 +13,32 @@ import static org.junit.Assert.*;
 
 /** 协议边界与入队前限流的防滥用回归。 */
 public final class CombatProtocolTest {
+    private static final int UNKNOWN_RELEASE_FIELD = 2;
+
+    @Test
+    public void guardIdsAreBoundedAndReleaseCannotCarryOtherIdentityFields() {
+        // uint32 的负 Java 值位于允许区间之外，零仅留给普通按下。
+        var press = TechniquePress.newBuilder()
+                .setTechniqueId("sample:guard")
+                .setPressId(CombatProtocol.MAX_PRESS_ID)
+                .build();
+        assertEquals(CombatProtocol.MAX_PRESS_ID, CombatProtocol.decodePress(press.toByteArray()).getPressId());
+        var invalidPress = press.toBuilder().setPressId(-1).build();
+        assertThrows(IllegalArgumentException.class, () -> CombatProtocol.decodePress(invalidPress.toByteArray()));
+        var release = TechniqueRelease.newBuilder().setPressId(1).build();
+        assertEquals(1, CombatProtocol.decodeRelease(release.toByteArray()).getPressId());
+        assertThrows(IllegalArgumentException.class, () -> CombatProtocol.decodeRelease(new byte[0]));
+        assertThrows(IllegalArgumentException.class,
+                () -> CombatProtocol.decodeRelease(new byte[CombatProtocol.MAX_RELEASE_BYTES + 1]));
+        var invalidRelease = release.toBuilder().setPressId(-1).build();
+        assertThrows(IllegalArgumentException.class,
+                () -> CombatProtocol.decodeRelease(invalidRelease.toByteArray()));
+        var field = UnknownFieldSet.Field.newBuilder().addVarint(1).build();
+        var unknown = UnknownFieldSet.newBuilder().addField(UNKNOWN_RELEASE_FIELD, field).build();
+        var extra = release.toBuilder().setUnknownFields(unknown).build();
+        assertThrows(IllegalArgumentException.class, () -> CombatProtocol.decodeRelease(extra.toByteArray()));
+    }
+
     @Test
     public void protocolRejectsMalformedOversizedAndNonFiniteDirection() {
         // 非法包在宿主查询前被拒绝，未知但合法的标识留给功法库判定。

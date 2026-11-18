@@ -150,7 +150,9 @@ public final class CombatGameTest {
             fixture.registerKnown();
             context.runAfterDelay(SYNC_TICKS, () -> {
                 context.assertTrue(fixture.known().size() == 1, "通道后注册未补发初始列表");
-                context.assertTrue(fixture.known().get(0).getTechniquesCount() == 0, "初次列表不是空表");
+                var initial = fixture.known().get(0);
+                context.assertTrue(initial.getTechniquesCount() == 1 && initial.getTechniques(0).getGuard(),
+                        "新身体没有天生守式投影");
                 fixture.learn();
                 context.runAfterDelay(SYNC_TICKS, () -> verifyKnown(context, fixture));
             });
@@ -294,7 +296,8 @@ public final class CombatGameTest {
             CombatTestPlayer fixture) {
         // 只读取真实网络记录的最后一份完整快照。
         var messages = fixture.known();
-        return messages.get(messages.size() - 1).getTechniques(0);
+        return messages.get(messages.size() - 1).getTechniquesList().stream()
+                .filter(entry -> entry.getId().equals(CombatTestContent.TECHNIQUE)).findFirst().orElseThrow();
     }
 
     private static void later(GameTestHelper context, CombatTestPlayer fixture, Runnable action) {
@@ -314,8 +317,8 @@ public final class CombatGameTest {
         try (fixture) {
             context.assertTrue(fixture.known().size() == 2, "KNOWN_CHANGED 没有推送更新");
             var known = fixture.known().get(1);
-            context.assertTrue(known.getTechniquesCount() == 1, "已学列表数量错误");
-            var technique = known.getTechniques(0);
+            context.assertTrue(known.getTechniquesCount() == 2, "已学与天生列表数量错误");
+            var technique = latest(fixture);
             context.assertTrue(technique.getId().equals(CombatTestContent.TECHNIQUE), "已学 ID 错误");
             context.assertTrue(technique.getName().equals("测试轻步"), "已学名称错误");
             context.assertTrue(technique.getDescription().equals("迈出轻盈的一步。"), "独立简介未同步");

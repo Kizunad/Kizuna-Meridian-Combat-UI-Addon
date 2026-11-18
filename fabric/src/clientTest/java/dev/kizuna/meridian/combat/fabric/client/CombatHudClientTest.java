@@ -51,7 +51,7 @@ public final class CombatHudClientTest implements ClientModInitializer {
     private static final Path SCREENS = Path.of("../hud-screens");
     private static final Path REPORT = Path.of("../clienttest-results.txt");
     private static final List<String> CASES =
-            List.of("four-states", "empty", "pressed", "released", "restored", "casting");
+            List.of("four-states", "empty", "pressed", "released", "restored", "casting", "guarding");
     /**
      * 「casting」那一张用的施放：一式放到收势、还没到收招段；第 3 槽那一式的承接窗口开着，第 9 槽那一式被服务端记着。
      * 施放条上起手、出招、收势、收招四段和两次打击、一个承接窗口都看得见。
@@ -88,6 +88,9 @@ public final class CombatHudClientTest implements ClientModInitializer {
     private CompletableFuture<?> learned;
     private CommandStep step = CommandStep.LEARN;
     private int stepStartTick;
+    private CombatClient owner;
+    private CombatGuardClientTest guardTest;
+    private boolean guardPassed;
 
     @Override
     public void onInitializeClient() {
@@ -121,6 +124,13 @@ public final class CombatHudClientTest implements ClientModInitializer {
                 commands(client, context);
                 return;
             }
+            if (!guardPassed) {
+                if (guardTest == null) {
+                    guardTest = new CombatGuardClientTest(owner);
+                }
+                guardPassed = guardTest.tick(ticks);
+                return;
+            }
             if (scale > FINAL_SCALE) {
                 // 全部画完后只等截图异步写盘。
                 return;
@@ -140,6 +150,7 @@ public final class CombatHudClientTest implements ClientModInitializer {
         // 读取正式入口已创建的对象，确保截图使用真实键位与同一个绘制实现。
         var entry = FabricLoader.getInstance().getEntrypoints("client", ClientModInitializer.class).stream()
                 .filter(CombatClient.class::isInstance).findFirst().orElseThrow();
+        owner = (CombatClient) entry;
         hud = field(entry, "hud", CombatHud.class);
         profiles = field(entry, "profiles", CombatProfiles.class);
         renderer = field(entry, "renderer", CombatHudRenderer.class);
@@ -305,6 +316,11 @@ public final class CombatHudClientTest implements ClientModInitializer {
         if (name.equals("casting")) {
             // 正在放别的式：能放的槽变灰带沙漏，能接的槽描暖色框，记着的槽描白框，槽条上方是施放条。
             renderer.render(context, CASTING);
+        } else if (name.equals("guarding")) {
+            // 持续式的零边界不能让槽位亮起，也不在槽条上方画虚构的长条。
+            var guard = new CombatCast(TOTAL_MILLIS, 0, 0, 0, 0, List.of(), List.of(), "",
+                    CombatCast.EndTimes.UNKNOWN);
+            renderer.render(context, guard);
         } else {
             renderer.render(context);
         }
@@ -405,6 +421,7 @@ public final class CombatHudClientTest implements ClientModInitializer {
         finished = true;
         try {
             Files.writeString(REPORT, "success=" + (failure == null) + "\ncommands=" + (step == CommandStep.DONE)
+                    + "\nguard=" + guardPassed
                     + "\ncaptures=" + captures
                     + "\nerror=" + failure + "\n");
         } catch (Exception reportFailure) {

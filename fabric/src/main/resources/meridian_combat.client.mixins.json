@@ -5,6 +5,8 @@
   "client": [
     "KeyboardMixin",
     "MouseMixin",
+    "GuardScreenMixin",
+    "GuardFocusMixin",
     "EntityMovementMixin",
     "ClientPlayerMixin",
     "LivingEntityJumpMixin",

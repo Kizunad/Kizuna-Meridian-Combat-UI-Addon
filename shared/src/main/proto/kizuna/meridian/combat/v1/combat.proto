@@ -3,12 +3,16 @@ package kizuna.meridian.combat.v1;
 option java_package = "dev.kizuna.meridian.combat.protocol.pb";
 option java_outer_classname = "CombatMessages";
 
-// 客户端只能提交功法标识和水平输入方向；不携带费用或身体身份。
+// 客户端只能提交功法标识、水平输入方向和连接内按压序号；不携带费用或身体身份。
 message TechniquePress {
   string technique_id = 1;
   float move_x = 2;
   float move_z = 3;
+  // 普通式为 0；守式使用 1..2147483647 的严格递增序号，同一连接内不复用。
+  uint32 press_id = 4;
 }
+// 松开只引用同一连接的一次按压，身体和施放身份由服务端映射。
+message TechniqueRelease { uint32 press_id = 1; }
 // 登录、已学变化和状态刷新时同步完整投影，空列表同样具有覆盖语义。
 message KnownTechniques { repeated KnownTechnique techniques = 1; }
 message KnownTechnique {
@@ -33,6 +37,8 @@ message KnownTechnique {
   // 现在放不出来属于哪一类，图标右下角按它叠小图标；没有（或旧服务端没发）时为 BLOCK_NONE。
   // 真元、力气这两类会随时间自己恢复，图标只变灰不标红框。
   BlockKind block = 13;
+  // 独立格挡键使用的守式，仍在知识列表中展示，但不能放入十槽。
+  bool guard = 14;
 }
 enum BlockKind {
   BLOCK_NONE = 0;

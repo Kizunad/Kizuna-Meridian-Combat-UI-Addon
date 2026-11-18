@@ -4,12 +4,15 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotCommand;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniqueRelease;
 
 import java.util.HashSet;
 
 /** 有界 Protobuf 解码；正式网络入口在对应游戏线程调用。 */
 public final class CombatProtocol {
     public static final int MAX_PRESS_BYTES = 1024;
+    public static final int MAX_RELEASE_BYTES = 32;
+    public static final int MAX_PRESS_ID = Integer.MAX_VALUE;
     public static final int MAX_KNOWN_BYTES = 1_048_576;
     public static final int MAX_KNOWN_COUNT = 4096;
     public static final int MAX_SLOT_BYTES = 1024;
@@ -18,7 +21,7 @@ public final class CombatProtocol {
     public static final long MAX_COOLDOWN_MILLIS = 86_400_000;
 
     private CombatProtocol() {
-        // 三条通道复用一致的边界规则。
+        // 所有通道复用一致的边界规则。
     }
 
     public static TechniquePress decodePress(byte[] payload) {
@@ -28,6 +31,9 @@ public final class CombatProtocol {
         }
         try {
             TechniquePress request = TechniquePress.parseFrom(payload);
+            if (request.getPressId() < 0 || !request.getUnknownFields().asMap().isEmpty()) {
+                throw new IllegalArgumentException("按压标识或字段无效");
+            }
             CombatIds.validateTechnique(request.getTechniqueId());
             if (!Float.isFinite(request.getMoveX()) || !Float.isFinite(request.getMoveZ())) {
                 throw new IllegalArgumentException("移动方向必须为有限数");
@@ -35,6 +41,22 @@ public final class CombatProtocol {
             return request;
         } catch (InvalidProtocolBufferException failure) {
             throw new IllegalArgumentException("战斗请求格式无效", failure);
+        }
+    }
+
+    public static TechniqueRelease decodeRelease(byte[] payload) {
+        // 独立小包不共享按下限流；未知字段不能偷偷携带身体或施放身份。
+        if (payload.length == 0 || payload.length > MAX_RELEASE_BYTES) {
+            throw new IllegalArgumentException("松开请求大小无效");
+        }
+        try {
+            TechniqueRelease request = TechniqueRelease.parseFrom(payload);
+            if (request.getPressId() <= 0 || !request.getUnknownFields().asMap().isEmpty()) {
+                throw new IllegalArgumentException("松开标识或字段无效");
+            }
+            return request;
+        } catch (InvalidProtocolBufferException failure) {
+            throw new IllegalArgumentException("松开请求格式无效", failure);
         }
     }
 

@@ -99,6 +99,16 @@ public final class CombatHudTest {
     }
 
     @Test
+    public void guardKnowledgeDoesNotTurnAnOldSlotBindingIntoACastButton() {
+        // 配置文件中的旧 ID 不能绕过独立格挡输入，知识列表本身仍可保留此项。
+        var guard = entry().toBuilder().setGuard(true /* guard */).build();
+        var hud = new CombatHud();
+        hud.update(snapshot(guard));
+        var bindings = Collections.nCopies(CombatIds.SLOT_COUNT, ID);
+        assertEquals(CombatHud.State.UNAVAILABLE, hud.slots(bindings, NOW_TICK).getFirst().state());
+    }
+
+    @Test
     public void shortOfQiOrStrengthGreysWithItsBadgeAndKeepsTheCooldown() {
         // 真元、力气不够：不在冷却时是 SHORT（变灰、不标红框），在冷却里仍照冷却画；两种都带原因类别供叠角标。
         var hud = new CombatHud();

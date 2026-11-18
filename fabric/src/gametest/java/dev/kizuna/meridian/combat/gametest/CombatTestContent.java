@@ -16,6 +16,11 @@ import java.util.UUID;
 final class CombatTestContent {
     static final String TECHNIQUE = "combat_test:step";
     static final String OTHER = "combat_test:other";
+    static final String GUARD = "combat_test:guard";
+    static final long GUARD_WARMUP = 200;
+    static final long GUARD_RECOVERY = 300;
+    private static final double GUARD_ANGLE = 120;
+    private static final double GUARD_MULTIPLIER = 0.7;
     static final long WARMUP_MILLIS = 100;
     static final long COOLDOWN_MILLIS = 2000;
     private static final double MAX_HP = 100;
@@ -36,8 +41,54 @@ final class CombatTestContent {
                 .addDefinitions(first)
                 .addDefinitions(newer)
                 .addDefinitions(other)
+                .addDefinitions(guard())
                 .build();
         return TechniqueRegistry.load(addons(), List.of(catalog));
+    }
+
+    private static TechniqueDefinition guard() {
+        // 天生守式只验证输入与身份，不依赖正式内容或人体挡位。
+        CastPhases phases = CastPhases.newBuilder()
+                .setWarmupMillis(GUARD_WARMUP)
+                .setActiveDuration(ActiveDuration.ACTIVE_DURATION_UNTIL_RELEASE)
+                .setRecoveryMillis(GUARD_RECOVERY)
+                .setInterruptibleByDamage(true /* interruptibleByDamage */)
+                .build();
+        Guard guard = Guard.newBuilder()
+                .setAngle(quantity(GUARD_ANGLE, Unit.DEGREE))
+                .setDamageMultiplier(quantity(GUARD_MULTIPLIER, Unit.RATIO))
+                .addDamageTags("combat_test:blockable")
+                .build();
+        TechniqueEffect effect = TechniqueEffect.newBuilder()
+                .setAtMillis(GUARD_WARMUP)
+                .setGuard(guard)
+                .build();
+        return definition(GUARD, 1).toBuilder()
+                .setCategory(Category.DEFENSE)
+                .setInnate(true /* innate */)
+                .setPhases(phases)
+                .setCooldownMillis(0)
+                .setAiHints(guardHints())
+                .addEffects(effect)
+                .build();
+    }
+
+    private static AiHints guardHints() {
+        // 守式角色与持续模式成组，测试不接入普通辅助选式。
+        SupportAiHints support = SupportAiHints.newBuilder().setRole(AiRole.AI_ROLE_GUARD).build();
+        return AiHints.newBuilder()
+                .setMinimumDistance(quantity(0, Unit.METER))
+                .setMaximumDistance(quantity(1, Unit.METER))
+                .setMaximumHpRatio(quantity(1, Unit.RATIO))
+                .setMinimumQiRatio(quantity(0, Unit.RATIO))
+                .setCategoryWeight(quantity(1, Unit.RATIO))
+                .setSupport(support)
+                .build();
+    }
+
+    private static Quantity quantity(double value, Unit unit) {
+        // 显式单位通过正式目录校验。
+        return Quantity.newBuilder().setValue(value).setUnit(unit).build();
     }
 
     static BodySnapshot body(UUID uuid) {

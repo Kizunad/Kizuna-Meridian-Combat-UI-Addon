@@ -36,6 +36,9 @@ public final class CombatHud {
         // 整份替换使切服、重学和内容移除不会沿用过期的图标与冷却。
         known.clear();
         for (KnownTechnique entry : snapshot.getTechniquesList()) {
+            if (entry.getGuard()) {
+                continue;
+            }
             String name = entry.getName();
             if (name.isEmpty()) {
                 name = entry.getId();
