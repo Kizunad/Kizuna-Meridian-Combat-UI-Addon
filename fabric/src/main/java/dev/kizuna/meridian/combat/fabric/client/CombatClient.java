@@ -66,6 +66,7 @@ public final class CombatClient implements ClientModInitializer {
     private CombatHudRenderer renderer;
     private String pendingWarning = "";
     private KnownTechniques known = KnownTechniques.getDefaultInstance();
+    private int practicePressId;
     private CombatSlotAccess.Connection connection = CombatSlotAccess.Connection.DISCONNECTED;
     private final Set<Integer> configurationKeys = new HashSet<>();
 
@@ -136,6 +137,7 @@ public final class CombatClient implements ClientModInitializer {
     private void join(Minecraft client) {
         // 使用集成服务器的实际目录名，避免重命名存档显示名称后换档。
         guard.disconnect();
+        practicePressId = 0;
         slots.updateKnown(Map.of());
         hud.clear();
         known = KnownTechniques.getDefaultInstance();
@@ -548,12 +550,19 @@ public final class CombatClient implements ClientModInitializer {
         int forward = axis(options.keyUp, options.keyDown);
         int sideways = axis(options.keyLeft, options.keyRight);
         CombatDirection direction = views.view().castDirection(forward, sideways, client.player.getYRot());
-        TechniquePress request = TechniquePress.newBuilder()
+        var request = TechniquePress.newBuilder()
                 .setTechniqueId(selection.techniqueId())
                 .setMoveX(direction.x())
-                .setMoveZ(direction.z())
-                .build();
-        ClientPlayNetworking.send(CombatChannels.PRESS.payload(request.toByteArray()));
+                .setMoveZ(direction.z());
+        for (var technique : known.getTechniquesList()) {
+            if (technique.getMaintainedBreathing() && technique.getId().equals(selection.techniqueId())) {
+                practicePressId = Math.incrementExact(practicePressId);
+                request.setPracticePressId(practicePressId);
+                request.setEndPracticeId(technique.getActivePracticeId());
+                break;
+            }
+        }
+        ClientPlayNetworking.send(CombatChannels.PRESS.payload(request.build().toByteArray()));
     }
 
     private static int axis(KeyMapping positive, KeyMapping negative) {

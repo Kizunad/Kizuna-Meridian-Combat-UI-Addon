@@ -7,6 +7,7 @@ import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniqueRelease;
 
 import java.util.HashSet;
+import java.util.regex.Pattern;
 
 /** 有界 Protobuf 解码；正式网络入口在对应游戏线程调用。 */
 public final class CombatProtocol {
@@ -17,6 +18,8 @@ public final class CombatProtocol {
     public static final int MAX_KNOWN_COUNT = 4096;
     public static final int MAX_SLOT_BYTES = 1024;
     private static final int MAX_NAME_LENGTH = 1024;
+    private static final int MAX_CAST_ID_LENGTH = 64;
+    private static final Pattern CAST_ID = Pattern.compile("[A-Za-z0-9_-]{1," + MAX_CAST_ID_LENGTH + "}");
     public static final int MAX_DESCRIPTION_LENGTH = 8192;
     public static final long MAX_COOLDOWN_MILLIS = 86_400_000;
 
@@ -35,6 +38,12 @@ public final class CombatProtocol {
                 throw new IllegalArgumentException("按压标识或字段无效");
             }
             CombatIds.validateTechnique(request.getTechniqueId());
+            if (request.getPracticePressId() < 0
+                    || request.getPracticePressId() != 0 && request.getPressId() != 0
+                    || !request.getEndPracticeId().isEmpty() && (request.getPracticePressId() == 0
+                        || !CAST_ID.matcher(request.getEndPracticeId()).matches())) {
+                throw new IllegalArgumentException("运功按压或收势身份无效");
+            }
             if (!Float.isFinite(request.getMoveX()) || !Float.isFinite(request.getMoveZ())) {
                 throw new IllegalArgumentException("移动方向必须为有限数");
             }
@@ -80,6 +89,10 @@ public final class CombatProtocol {
                 }
                 long endTick = entry.getCooldownEndTick();
                 long total = entry.getCooldownTotalMillis();
+                if (!entry.getActivePracticeId().isEmpty() && (!entry.getMaintainedBreathing()
+                        || !CAST_ID.matcher(entry.getActivePracticeId()).matches())) {
+                    throw new IllegalArgumentException("运功投影身份无效");
+                }
                 if (!identities.add(id) || entry.getName().length() > MAX_NAME_LENGTH
                         || entry.getUnavailableReason().length() > MAX_NAME_LENGTH
                         || entry.getDescription().length() > MAX_DESCRIPTION_LENGTH

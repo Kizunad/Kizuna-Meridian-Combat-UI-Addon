@@ -10,6 +10,8 @@ message TechniquePress {
   float move_z = 3;
   // 普通式为 0；守式使用 1..2147483647 的严格递增序号，同一连接内不复用。
   uint32 press_id = 4;
+  uint32 practice_press_id = 5; // 普通槽按运功式时的连接内递增序号，与 G 独立
+  string end_practice_id = 6; // 客户端最近收到的本次运功身份；空表示请求起式
 }
 // 松开只引用同一连接的一次按压，身体和施放身份由服务端映射。
 message TechniqueRelease { uint32 press_id = 1; }
@@ -39,6 +41,8 @@ message KnownTechnique {
   BlockKind block = 13;
   // 独立格挡键使用的守式，仍在知识列表中展示，但不能放入十槽。
   bool guard = 14;
+  bool maintained_breathing = 15;
+  string active_practice_id = 16; // 本式正在维持时同步实际施放身份
 }
 enum BlockKind {
   BLOCK_NONE = 0;

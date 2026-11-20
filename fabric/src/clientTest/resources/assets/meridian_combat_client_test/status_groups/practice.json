@@ -1,0 +1,9 @@
+{
+  "effects": ["meridian_combat_client_test:practice"],
+  "group": {
+    "name": "status_group.meridian_basic_techniques.technique",
+    "icon": "meridian_basic_techniques:status_group/technique",
+    "merge_order": 30,
+    "display_order": 50
+  }
+}

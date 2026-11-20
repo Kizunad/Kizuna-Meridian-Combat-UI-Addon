@@ -2,6 +2,22 @@ schema_version: 1
 namespace: "meridian_combat_client_test"
 binding_templates { id: "human:adult" version: 1 }
 definitions {
+  id: "meridian_combat_client_test:practice"
+  version: 1
+  category: BUFF
+  minimum_realm: WANDERING_QI
+  cost {}
+  phases { warmup_millis: 100 active_millis: 0 recovery_millis: 0 interruptible_by_damage: true }
+  cooldown_millis: 0
+  maintained_breathing {
+    effect_id: "meridian_combat_client_test:practice"
+    color_rgb: 3178400
+    qi_per_second: 0.005
+    factors { intake_multiplier: 1.5 respiratory_work_multiplier: 0.5 }
+  }
+  presentation { display_name: "运功验收" }
+}
+definitions {
   id: "meridian_combat_client_test:guard"
   version: 1
   category: DEFENSE

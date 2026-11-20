@@ -5,6 +5,7 @@ import com.mojang.blaze3d.platform.NativeImage;
 import dev.kizuna.meridian.combat.core.CombatCast;
 import dev.kizuna.meridian.combat.core.CombatConfigFile;
 import dev.kizuna.meridian.combat.core.CombatHud;
+import dev.kizuna.meridian.combat.core.CombatInput;
 import dev.kizuna.meridian.combat.core.CombatIds;
 import dev.kizuna.meridian.combat.core.CombatProfiles;
 import dev.kizuna.meridian.combat.core.CombatSlots;
@@ -91,6 +92,7 @@ public final class CombatHudClientTest implements ClientModInitializer {
     private CombatClient owner;
     private CombatGuardClientTest guardTest;
     private boolean guardPassed;
+    private CombatPracticeClientTest practiceTest;
 
     @Override
     public void onInitializeClient() {
@@ -122,6 +124,12 @@ public final class CombatHudClientTest implements ClientModInitializer {
             survival.join();
             if (step != CommandStep.DONE) {
                 commands(client, context);
+                return;
+            }
+            if (practiceTest == null) {
+                practiceTest = new CombatPracticeClientTest(client, SCREENS, field(owner, "input", CombatInput.class));
+            }
+            if (!practiceTest.tick(ticks)) {
                 return;
             }
             if (!guardPassed) {

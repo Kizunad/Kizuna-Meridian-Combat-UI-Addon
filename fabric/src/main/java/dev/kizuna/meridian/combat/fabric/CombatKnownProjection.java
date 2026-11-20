@@ -16,6 +16,7 @@ import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueRefe
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueVolume;
 import dev.kizuna.meridian.technique.server.TechniqueAvailability;
 import dev.kizuna.meridian.technique.server.TechniqueBinder;
+import dev.kizuna.meridian.technique.server.TechniqueBreathingPractice;
 import dev.kizuna.meridian.technique.server.TechniqueKnowledge;
 import dev.kizuna.meridian.technique.server.TechniqueReferenceText;
 import dev.kizuna.meridian.technique.server.TechniqueRegistry;
@@ -48,6 +49,7 @@ final class CombatKnownProjection {
         var result = KnownTechniques.newBuilder();
         long now = body.settledAt().elapsedMillis();
         var volumes = volumes(registry);
+        var practice = TechniqueBreathingPractice.active(body);
         for (var definition : definitions.values()) {
             String id = definition.getId();
             long end = Math.max(progress.getCooldownsOrDefault(id, 0), progress.getCurveEndsOrDefault(id, 0));
@@ -59,6 +61,11 @@ final class CombatKnownProjection {
             }
             BindingOutcome outcome = binding(body, definition, mainHandSide);
             var entry = entry(registry, volumes, definition, endTick, outcome.getFailure());
+            if (definition.hasMaintainedBreathing()) {
+                entry.setMaintainedBreathing(true /* maintainedBreathing */);
+                practice.filter(active -> active.getTechniqueId().equals(id))
+                        .ifPresent(active -> entry.setActivePracticeId(active.getCastId()));
+            }
             if (outcome.hasBinding()) {
                 // 先看手里的东西对不对，再看真元和力气：兵器都没拿对时，报缺真元没有用。
                 BlockKind block = BlockKind.BLOCK_ITEM;

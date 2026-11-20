@@ -51,6 +51,8 @@ dependencies {
     // 登录假玩家与记录连接夹具来自功法库的 testFixtures，与功法 fabric 同经源码组合解析。
     gametestImplementation testFixtures('dev.kizuna.meridian.technique:fabric')
     clientTestCompileOnly files(kizunaWorkspace.artifact('human', 'server', false))
+    // 真客户端核对框架实际画出的状态图标；运行时由完整装配提供同一 JAR。
+    clientTestCompileOnly files(kizunaWorkspace.artifact('inventory-ui', '', false))
 }
 loom {
     mods {

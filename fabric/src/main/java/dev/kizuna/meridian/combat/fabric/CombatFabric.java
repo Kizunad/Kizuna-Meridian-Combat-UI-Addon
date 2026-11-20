@@ -15,6 +15,7 @@ import dev.kizuna.meridian.fabric.MeridianCommands;
 import dev.kizuna.meridian.fabric.ProtobufChannel;
 import dev.kizuna.meridian.protocol.pb.MeridianMessages.FailureCode;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
+import dev.kizuna.meridian.technique.fabric.world.TechniqueBreathingStatuses;
 import dev.kizuna.meridian.technique.fabric.world.TechniqueInputBuffer;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueFailure;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
@@ -53,6 +54,7 @@ public final class CombatFabric implements ModInitializer {
     private final Map<UUID, KnownTechniques> sentKnown = new HashMap<>();
     private final PressLimiter limiter = new PressLimiter();
     private final Map<ServerGamePacketListenerImpl, CombatGuardSession> guards = new HashMap<>();
+    private final Map<ServerGamePacketListenerImpl, Integer> practicePresses = new HashMap<>();
     private final Set<UUID> pendingKnown = new HashSet<>();
     private final Set<UUID> pausedKnown = new HashSet<>();
     private final Set<UUID> reportedFailures = new HashSet<>();
@@ -73,6 +75,7 @@ public final class CombatFabric implements ModInitializer {
             reportedFailures.remove(uuid);
             pendingKnown.add(uuid);
             guards.put(handler, new CombatGuardSession());
+            practicePresses.put(handler, 0);
         });
         ClientboundPlayChannelEvents.REGISTER.register((handler, sender, server, channels) -> {
             if (channels.contains(CombatChannels.KNOWN.type().id())) {
@@ -86,6 +89,7 @@ public final class CombatFabric implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(this::flushKnown);
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
             guards.remove(handler);
+            practicePresses.remove(handler);
             disconnect(handler.player.getUUID());
         });
         ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
@@ -113,6 +117,7 @@ public final class CombatFabric implements ModInitializer {
         // 停服不保留旧连接的同步状态。
         limiter.clear();
         guards.clear();
+        practicePresses.clear();
         pendingKnown.clear();
         gate.clear();
         knownHosts = null;
@@ -144,6 +149,14 @@ public final class CombatFabric implements ModInitializer {
         try {
             var casting = casting();
             var request = casting.request(playerUuid, press);
+            var definition = TechniqueFabric.service().registry().find(request.getTechnique());
+            if (definition.isPresent() && definition.get().hasMaintainedBreathing()) {
+                pressPractice(player, press, request);
+                return;
+            }
+            if (press.getPracticePressId() != 0) {
+                return;
+            }
             if (casting.guard(request)) {
                 pressGuard(player, press.getPressId(), request);
                 return;
@@ -161,6 +174,25 @@ public final class CombatFabric implements ModInitializer {
             LOGGER.warn("战斗施放失败：{}", playerUuid, failure);
             player.sendSystemMessage(Component.literal("当前无法施放功法"), true /* overlay */);
         }
+    }
+
+    private void pressPractice(ServerPlayer player, TechniquePress press, CastRequest request) {
+        // 一个连接只接受递增的运功按键；收势只对客户端最近看到的那次运功生效。
+        int sequence = press.getPracticePressId();
+        Integer previous = practicePresses.get(player.connection);
+        if (previous == null || sequence <= previous) {
+            return;
+        }
+        practicePresses.put(player.connection, sequence);
+        if (!press.getEndPracticeId().isEmpty()) {
+            TechniqueBreathingStatuses.end(player, press.getTechniqueId(), press.getEndPracticeId());
+        } else {
+            var outcome = TechniqueFabric.service().cast(player.getUUID(), request);
+            if (outcome.getFailure() != TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED) {
+                player.sendSystemMessage(Component.literal(outcome.getReason()), true /* overlay */);
+            }
+        }
+        pendingKnown.add(player.getUUID());
     }
 
     private void pressGuard(ServerPlayer player, int pressId, CastRequest request) {

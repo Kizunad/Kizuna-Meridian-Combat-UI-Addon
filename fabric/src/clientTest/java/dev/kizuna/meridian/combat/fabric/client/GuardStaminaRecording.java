@@ -244,7 +244,9 @@ public final class GuardStaminaRecording {
             strike();
             var active = TechniqueState.read(host().inspect().body()).getActiveCast();
             if (!active.getSustained().hasWeaponContactOnBreak()) {
-                throw new IllegalStateException("第二次命中未造成破防");
+                throw new IllegalStateException("第二次命中未造成破防，命中前余力 " + available
+                        + "，命中后 " + HumanStamina.from(host().inspect().body()).availableJoules()
+                        + "，守式 " + active.getSustained());
             }
             return true;
         });

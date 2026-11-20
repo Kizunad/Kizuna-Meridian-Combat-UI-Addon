@@ -142,3 +142,9 @@ UI 在关闭、录入和切屏时调用 `clearInput()` 清理排队按键与跨�
 
 Combat 不依赖 Meridian UI、Inventory UI 或 owo。目标 UUID、实体引用、镜头角度和草稿不持久化，
 不新增服务端协议。使用方式见[姿态设置](Stance-Settings.md)。
+
+### 普通槽运功开关
+
+已学投影的 `maintained_breathing` 标识运功式。`active_practice_id` 在起式完成后携带当前维持身份。
+普通槽发送独立递增的 `practice_press_id`，起式时 `end_practice_id` 留空；再次点按时带回投影中的身份。
+服务端按连接拒绝旧序号，收势时同时核对实体、功法和施放身份。格挡继续使用自己的 `press_id` 通路。
