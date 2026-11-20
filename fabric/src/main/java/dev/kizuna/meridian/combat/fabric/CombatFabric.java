@@ -173,7 +173,13 @@ public final class CombatFabric implements ModInitializer {
         if (outcome.getFailure() == TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED) {
             session.started(pressId, request);
         } else {
-            player.sendSystemMessage(Component.literal(outcome.getReason()), true /* overlay */);
+            String reason = outcome.getReason();
+            Component message = switch (reason) {
+                case "meridian_human_host.guard.broken", "meridian_human_host.guard.weak" ->
+                        Component.translatable(reason);
+                default -> Component.literal(reason);
+            };
+            player.sendSystemMessage(message, true /* overlay */);
         }
     }
 

@@ -33,6 +33,7 @@ import java.util.function.BooleanSupplier;
 final class CombatGuardClientTest {
     private static final String GUARD = "meridian_combat_client_test:guard";
     private static final int TIMEOUT_TICKS = 200;
+    private static final int RECOVERY_TIMEOUT_TICKS = 600;
     private static final int QUIET_TICKS = 5;
     private static final int MOUSE_BUTTON = GLFW.GLFW_MOUSE_BUTTON_4;
     private final Minecraft client = Minecraft.getInstance();
@@ -47,6 +48,7 @@ final class CombatGuardClientTest {
     private final Method mouse;
     private final Method focus;
     private final CompletableFuture<?> subscribed;
+    private final GuardStaminaRecording recording;
     private Step step;
     private int startTick;
     private int tick;
@@ -63,6 +65,7 @@ final class CombatGuardClientTest {
     CombatGuardClientTest(CombatClient owner) throws Exception {
         // 获取正式状态，不增加可写的生产测试接口。
         input = field(owner, "input", CombatInput.class);
+        recording = new GuardStaminaRecording();
         hud = field(owner, "hud", CombatHud.class);
         profiles = field(owner, "profiles", CombatProfiles.class);
         var guard = field(owner, "guard", CombatGuardInput.class);
@@ -145,10 +148,69 @@ final class CombatGuardClientTest {
         steps.add(new Step("exit-release", () -> keyTap(GLFW.GLFW_KEY_R), this::releasedAndEnded));
         steps.add(new Step("reenter-no-resume", () -> keyTap(GLFW.GLFW_KEY_R), this::quietWithoutNewCast));
         steps.add(new Step("exit-physical-release", () -> key(GLFW.GLFW_KEY_G, GLFW.GLFW_RELEASE), () -> true));
+        enqueueStamina("arms");
+        enqueueStamina("sword");
+        enqueueRestartBoundary();
+        steps.add(new Step("restore-slot-fixture", recording::restoreSlotFixture, recording::ready));
         enqueueDeath();
         steps.add(new Step("guard-not-a-slot", this::checkSlotRejection, () -> true));
         steps.add(new Step("leave-stance", () -> keyTap(GLFW.GLFW_KEY_R),
                 () -> input.state() == CombatInput.State.OUTSIDE));
+    }
+
+    private void enqueueRestartBoundary() {
+        // 余力已够时单独验截止前一拍，再验截止和余力两个等号同时成立。
+        steps.add(new Step("prepare-restart-boundary", recording::prepareBoundary, recording::ready));
+        steps.add(new Step("early-with-stamina", this::pressAgain, () -> recording.message("broken")));
+        steps.add(new Step("step-to-deadline", recording::stepToDeadline, recording::atDeadline));
+        steps.add(new Step("exact-restart", () -> {
+            expectedCasts++;
+            pressAgain();
+        }, () -> castIds().size() == expectedCasts));
+        steps.add(new Step("resume-clock", recording::resumeTime, this::effective));
+        steps.add(new Step("release-boundary", () -> key(GLFW.GLFW_KEY_G, GLFW.GLFW_RELEASE), this::releasedAndEnded));
+    }
+
+    private void enqueueStamina(String style) {
+        // 两次都用同一玩家，先录自然破防后的拒绝与恢复，再用有效 G 核实重新成架。
+        steps.add(new Step(style + "-prepare", () -> recording.prepare(style), recording::ready));
+        steps.add(new Step(style + "-raise", this::startKeyboardGuard, this::effective));
+        steps.add(new Step(style + "-contact", recording::hit, recording::hitPaid));
+        steps.add(new Step(style + "-break", () -> {}, this::exhausted));
+        steps.add(new Step(style + "-broken-message", () -> pressAgain(), () -> recording.message("broken")));
+        steps.add(new Step(style + "-wait-deadline", () -> {}, () -> tick - startTick >= GuardStaminaRecording.WAIT));
+        steps.add(new Step(style + "-weak-message", () -> pressAgain(), () -> recording.message("weak")));
+        steps.add(new Step(style + "-natural-recovery", () -> {}, recording::recovered));
+        steps.add(new Step(style + "-restart", () -> {
+            key(GLFW.GLFW_KEY_G, GLFW.GLFW_RELEASE);
+            startKeyboardGuard();
+        }, this::effective));
+        steps.add(new Step(style + "-show-restart", () -> {}, () -> tick - startTick >= QUIET_TICKS));
+        steps.add(new Step(style + "-lower", () -> key(GLFW.GLFW_KEY_G, GLFW.GLFW_RELEASE), this::releasedAndEnded));
+        steps.add(new Step(style + "-finish-recording", recording::finish, recording::saved));
+    }
+
+    private boolean exhausted() {
+        // 实际收势事件提供破防原因；同一身份的普通松开不满足此条件。
+        String id = lastCastId();
+        return states.stream().anyMatch(state -> state.active().getRequest().getCastId().equals(id)
+                && state.active().getSustained().getExhausted());
+    }
+
+    private boolean effective() {
+        // 余力低时普通槽会优先显示力竭；录像只等待这次按压对应的服务端守窗。
+        if (castIds().size() != expectedCasts) {
+            return false;
+        }
+        String id = lastCastId();
+        return states.stream().anyMatch(state -> state.active().getRequest().getCastId().equals(id)
+                && state.phase() == CastPhase.EFFECTIVE);
+    }
+
+    private void pressAgain() throws Exception {
+        // 破防后须先真实松开旧按压，再发一轮新的 G。
+        key(GLFW.GLFW_KEY_G, GLFW.GLFW_RELEASE);
+        key(GLFW.GLFW_KEY_G, GLFW.GLFW_PRESS);
     }
 
     private void enqueueDeath() {
@@ -166,6 +228,7 @@ final class CombatGuardClientTest {
     boolean tick(int nowTick) throws Exception {
         // 每步有独立超时，失败不能被截图成功掩盖。
         tick = nowTick;
+        recording.capture(tick);
         if (!subscribed.isDone()) {
             return false;
         }
@@ -179,8 +242,9 @@ final class CombatGuardClientTest {
             step.start().run();
             return false;
         }
-        if (nowTick - startTick > TIMEOUT_TICKS) {
-            throw new IllegalStateException("格挡客户端超时：" + step.name() + " states=" + states);
+        int limit = step.name().endsWith("-natural-recovery") ? RECOVERY_TIMEOUT_TICKS : TIMEOUT_TICKS;
+        if (nowTick - startTick > limit) {
+            throw new IllegalStateException("格挡客户端超时：" + step.name() + " casts=" + castIds());
         }
         if (step.complete().getAsBoolean()) {
             System.out.println("P5_GUARD_PASS " + step.name());

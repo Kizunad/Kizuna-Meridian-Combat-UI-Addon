@@ -50,6 +50,7 @@ sourceSets {
 dependencies {
     // 登录假玩家与记录连接夹具来自功法库的 testFixtures，与功法 fabric 同经源码组合解析。
     gametestImplementation testFixtures('dev.kizuna.meridian.technique:fabric')
+    clientTestCompileOnly files(kizunaWorkspace.artifact('human', 'server', false))
 }
 loom {
     mods {
