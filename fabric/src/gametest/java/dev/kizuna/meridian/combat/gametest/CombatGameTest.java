@@ -130,11 +130,10 @@ public final class CombatGameTest {
             blocked.learn();
             other.learn();
             for (int index = 0; index < PressLimiter.MAX_PER_SECOND; index++) {
-                blocked.press(press(CombatTestContent.OTHER, 0, 0));
+                blocked.press(new byte[]{(byte) 0xff});
             }
             blocked.press(press(CombatTestContent.TECHNIQUE, 0, 0));
-            context.assertTrue(blocked.overlays().size() == PressLimiter.MAX_PER_SECOND,
-                    "正式通道没有执行每玩家限流");
+            context.assertTrue(blocked.overlays().isEmpty(), "无效包产生了动作栏反馈");
             context.assertFalse(TechniqueState.read(blocked.body.current()).hasActiveCast(), "限流包仍然起手");
             other.press(press(CombatTestContent.TECHNIQUE, 0, 0));
             context.assertTrue(TechniqueState.read(other.body.current()).hasActiveCast(), "一个玩家耗尽了其他玩家额度");
