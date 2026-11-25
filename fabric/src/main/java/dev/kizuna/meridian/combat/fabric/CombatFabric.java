@@ -168,7 +168,7 @@ public final class CombatFabric implements ModInitializer {
             var pressed = TechniqueInputBuffer.press(player, request);
             var outcome = pressed.outcome();
             if (outcome.getFailure() != TechniqueFailure.TECHNIQUE_FAILURE_UNSPECIFIED && !pressed.buffered()) {
-                player.sendSystemMessage(Component.literal(outcome.getReason()), true /* overlay */);
+                player.sendSystemMessage(TechniqueInputBuffer.failureMessage(outcome), true /* overlay */);
             }
         } catch (RuntimeException failure) {
             LOGGER.warn("战斗施放失败：{}", playerUuid, failure);
