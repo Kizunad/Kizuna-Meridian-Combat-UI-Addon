@@ -1,0 +1,13 @@
+{
+  "key.category.meridian_combat.general": "Meridian Combat",
+  "key.meridian_combat.stance": "Combat Stance",
+  "key.meridian_combat.guard": "Guard (Hold)",
+  "message.meridian_combat.guard_unavailable": "No guarding form is available.",
+  "message.meridian_combat.guard_slot": "Guard uses its own key and does not use a slot.",
+  "key.meridian_combat.slot_ten": "Combat Stance Slot 10",
+  "key.meridian_combat.view": "Toggle Stance View",
+  "key.meridian_combat.lock_view": "Link Combat View to Character",
+  "key.meridian_combat.face_target": "Face Target Automatically",
+  "hud.meridian_combat.stagger.self": "Staggered for %s seconds",
+  "hud.meridian_combat.stagger.target": "Target staggered for %s seconds"
+}
