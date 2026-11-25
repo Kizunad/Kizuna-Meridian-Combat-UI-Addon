@@ -13,7 +13,8 @@ import java.util.List;
 import java.util.UUID;
 
 /** 测试专用无费用功法与最小身体，不进入发行包。 */
-final class CombatTestContent {
+public final class CombatTestContent {
+    public static final String BROKEN_DETAILS = "combat_test:broken_details";
     static final String TECHNIQUE = "combat_test:step";
     static final String OTHER = "combat_test:other";
     static final String GUARD = "combat_test:guard";
@@ -42,6 +43,7 @@ final class CombatTestContent {
                 .addDefinitions(first)
                 .addDefinitions(newer)
                 .addDefinitions(other)
+                .addDefinitions(definition(BROKEN_DETAILS, 1))
                 .addDefinitions(guard())
                 .build();
         return TechniqueRegistry.load(addons(), List.of(catalog));

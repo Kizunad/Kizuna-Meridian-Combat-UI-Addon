@@ -68,8 +68,13 @@ final class CombatTestPlayer implements AutoCloseable {
 
     void learn() {
         // 只学旧版本，目录中的新版不能被客户端 ID 自动授予。
+        learn(CombatTestContent.TECHNIQUE);
+    }
+
+    void learn(String techniqueId) {
+        // 通过公开服务记录指定功法的第一版，触发正式知识变更事件。
         TechniqueReference reference = TechniqueReference.newBuilder()
-                .setId(CombatTestContent.TECHNIQUE)
+                .setId(techniqueId)
                 .setVersion(1)
                 .build();
         TechniqueFabric.service().learn(player.getUUID(), reference);

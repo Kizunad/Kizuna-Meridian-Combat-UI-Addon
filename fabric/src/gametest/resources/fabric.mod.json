@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "name": "战斗输入服务端测试",
   "environment": "server",
+  "mixins": ["meridian_combat_test.mixins.json"],
   "entrypoints": {
     "fabric-gametest": [
       "dev.kizuna.meridian.combat.gametest.CombatGameTest",

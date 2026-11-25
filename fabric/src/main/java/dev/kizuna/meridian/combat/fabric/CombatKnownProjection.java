@@ -21,6 +21,8 @@ import dev.kizuna.meridian.technique.server.TechniqueKnowledge;
 import dev.kizuna.meridian.technique.server.TechniqueReferenceText;
 import dev.kizuna.meridian.technique.server.TechniqueRegistry;
 import dev.kizuna.meridian.technique.server.TechniqueState;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -31,6 +33,8 @@ import java.util.function.Predicate;
 
 /** HUD 的只读身体投影；是否真正施放仍由功法服务原子校验。 */
 final class CombatKnownProjection {
+    private static final Logger LOGGER = LoggerFactory.getLogger("meridian_combat");
+
     private CombatKnownProjection() {
         // 投影不持有身体或客户端槽位。
     }
@@ -41,16 +45,11 @@ final class CombatKnownProjection {
         // 每个身份只展示目录中仍存在的最高已学或天生版本，与实际施放选择一致。
         HandSide mainHandSide = items.getMainHandSide();
         var progress = TechniqueState.read(body);
-        var definitions = new TreeMap<String, TechniqueDefinition>();
-        for (var reference : TechniqueKnowledge.references(registry, body)) {
-            registry.find(reference).ifPresent(definition -> definitions.merge(
-                    definition.getId(), definition, CombatKnownProjection::newer));
-        }
         var result = KnownTechniques.newBuilder();
         long now = body.settledAt().elapsedMillis();
         var volumes = volumes(registry);
         var practice = TechniqueBreathingPractice.active(body);
-        for (var definition : definitions.values()) {
+        for (var definition : knownDefinitions(registry, body)) {
             String id = definition.getId();
             long end = Math.max(progress.getCooldownsOrDefault(id, 0), progress.getCurveEndsOrDefault(id, 0));
             long remaining = Math.max(0, end - now);
@@ -76,14 +75,34 @@ final class CombatKnownProjection {
             } else {
                 entry.setBlock(BlockKind.BLOCK_BODY);
             }
-            entry.addAllDetails(TechniqueReferenceText.lines(registry, definition));
-            if (outcome.hasBinding()) {
-                // 绑得上才写得出用哪几条经脉、哪几块筋肉；绑不上时上面的「当前不可用」已经说了原因。
-                entry.addAllDetails(TechniqueReferenceText.modules(body, outcome.getBinding()));
-            }
+            addDetails(entry, registry, definition, body, outcome);
             result.addTechniques(entry.build());
         }
         return result.build();
+    }
+
+    private static Iterable<TechniqueDefinition> knownDefinitions(TechniqueRegistry registry, BodySnapshot body) {
+        // 同一标识只投影最高已学版本，并按标识排序。
+        var definitions = new TreeMap<String, TechniqueDefinition>();
+        for (var reference : TechniqueKnowledge.references(registry, body)) {
+            registry.find(reference).ifPresent(definition -> definitions.merge(
+                    definition.getId(), definition, CombatKnownProjection::newer));
+        }
+        return definitions.values();
+    }
+
+    private static void addDetails(KnownTechnique.Builder entry, TechniqueRegistry registry,
+                                   TechniqueDefinition definition, BodySnapshot body, BindingOutcome outcome) {
+        // 部位说明依赖绑定。任一段说明生成失败时清掉已写入的行，基础条目仍可发送。
+        try {
+            entry.addAllDetails(TechniqueReferenceText.lines(registry, definition));
+            if (outcome.hasBinding()) {
+                entry.addAllDetails(TechniqueReferenceText.modules(body, outcome.getBinding()));
+            }
+        } catch (RuntimeException failure) {
+            entry.clearDetails();
+            LOGGER.warn("无法生成已学功法说明：{}", definition.getId(), failure);
+        }
     }
 
     private static Map<TechniqueReference, TechniqueVolume> volumes(TechniqueRegistry registry) {

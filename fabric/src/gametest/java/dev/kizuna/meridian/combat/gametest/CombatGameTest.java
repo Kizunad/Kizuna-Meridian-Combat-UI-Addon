@@ -9,6 +9,7 @@ import dev.kizuna.meridian.combat.core.CombatHud;
 import dev.kizuna.meridian.combat.core.CombatIds;
 import dev.kizuna.meridian.combat.core.CombatProtocol;
 import dev.kizuna.meridian.combat.core.PressLimiter;
+import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechnique;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.SlotOperation;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
 import dev.kizuna.meridian.technique.fabric.TechniqueFabric;
@@ -139,6 +140,34 @@ public final class CombatGameTest {
             context.assertTrue(TechniqueState.read(other.body.current()).hasActiveCast(), "一个玩家耗尽了其他玩家额度");
         }
         context.succeed();
+    }
+
+    @GameTest(maxTicks = DEFAULT_TIMEOUT)
+    public void brokenDetailsKeepKnownTechniques(GameTestHelper context) {
+        // 从真实已学推送核对故障式、其他已学式和天生式。
+        var fixture = new CombatTestPlayer(context);
+        fixture.registerKnown();
+        fixture.learn();
+        fixture.learn(CombatTestContent.BROKEN_DETAILS);
+        later(context, fixture, () -> {
+            try (fixture) {
+                var packets = fixture.known();
+                context.assertFalse(packets.isEmpty(), "单式说明异常中断了整份已学功法推送");
+                var entries = packets.getLast().getTechniquesList().stream()
+                        .collect(Collectors.toMap(KnownTechnique::getId, entry -> entry));
+                var expected = Set.of(CombatTestContent.BROKEN_DETAILS, CombatTestContent.TECHNIQUE,
+                        CombatTestContent.GUARD);
+                context.assertTrue(entries.keySet().equals(expected), "推送的功法不全：" + entries.keySet());
+                var broken = entries.get(CombatTestContent.BROKEN_DETAILS);
+                context.assertTrue(broken.getDetailsCount() == 0, "故障式仍带有说明");
+                context.assertTrue(broken.getName().equals("测试轻步")
+                        && broken.getCooldownTotalMillis() == CombatTestContent.COOLDOWN_MILLIS, "故障式基础字段丢失");
+                for (String id : List.of(CombatTestContent.TECHNIQUE, CombatTestContent.GUARD)) {
+                    context.assertTrue(entries.get(id).getDetailsList().contains("境界：游炁以上"), "其他式缺少说明：" + id);
+                }
+            }
+            context.succeed();
+        });
     }
 
     @GameTest(maxTicks = DEFAULT_TIMEOUT)
