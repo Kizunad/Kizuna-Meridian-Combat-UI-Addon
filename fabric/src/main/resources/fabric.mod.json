@@ -3,7 +3,13 @@
   "id": "meridian_combat",
   "version": "${version}",
   "name": "Kizuna 经脉战斗 UI",
-  "description": "战斗架势、十槽本地配置与逐次施放",
+  "contact": {
+    "homepage": "https://github.com/Kizunad/Kizuna-Meridian-Combat-UI-Addon",
+    "sources": "https://github.com/Kizunad/Kizuna-Meridian-Combat-UI-Addon",
+    "issues": "https://github.com/Kizunad/Kizuna-Meridian-Combat-UI-Addon/issues"
+  },
+  "icon": "assets/meridian_combat/icon.png",
+  "description": "Set up combat stances and assign techniques to ten slots for use in battle.\n配置战斗架势，将招式编入十个槽位，在交手时依次施展。",
   "authors": ["Kizunad"],
   "license": "PolyForm-Noncommercial-1.0.0",
   "environment": "*",
