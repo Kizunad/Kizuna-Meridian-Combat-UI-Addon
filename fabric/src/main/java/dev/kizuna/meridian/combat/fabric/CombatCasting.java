@@ -5,7 +5,7 @@ import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.KnownTechniques;
 import dev.kizuna.meridian.combat.protocol.pb.CombatMessages.TechniquePress;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastOutcome;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.CastRequest;
-import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.ActiveDuration;
+import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueDefinition;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.HorizontalDirection;
 import dev.kizuna.meridian.technique.protocol.pb.TechniqueMessages.TechniqueReference;
 import dev.kizuna.meridian.technique.server.TechniqueHostDirectory;
@@ -47,9 +47,14 @@ public final class CombatCasting {
     public boolean guard(CastRequest request) {
         // 目录已校验持续式必须有唯一 Guard，不从客户端标志推断权限。
         return service.registry().find(request.getTechnique())
-                .map(definition -> definition.getPhases().getActiveDuration()
-                        == ActiveDuration.ACTIVE_DURATION_UNTIL_RELEASE)
+                .map(CombatCasting::heldGuard)
                 .orElse(false);
+    }
+
+    static boolean heldGuard(TechniqueDefinition definition) {
+        // 需要松键收势的守式走专用按键，限时守式走普通战斗槽。
+        return definition.getEffectsList().stream()
+                .anyMatch(effect -> effect.hasGuard() && !effect.getGuard().hasMaximumHoldMillis());
     }
 
     public KnownTechniques known(UUID entityUuid, long gameTick) {

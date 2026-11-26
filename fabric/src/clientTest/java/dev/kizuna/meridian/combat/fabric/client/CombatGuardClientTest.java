@@ -102,7 +102,7 @@ final class CombatGuardClientTest {
     private void enqueueKeyboardCases() {
         // 架势外、同 tick 短按、按键连发及鼠标改绑都经生产 Mixin。
         steps.add(new Step("outside-no-packet", () -> keyTap(GLFW.GLFW_KEY_G), this::quietWithoutNewCast));
-        steps.add(new Step("enter-stance", () -> keyTap(GLFW.GLFW_KEY_R),
+        steps.add(new Step("enter-stance", this::enterStance,
                 () -> input.state() == CombatInput.State.ACTIVE));
         steps.add(new Step("same-tick-tap", () -> {
             expectedCasts++;
@@ -122,6 +122,14 @@ final class CombatGuardClientTest {
             guardKey.setKey(InputConstants.Type.KEYSYM.getOrCreate(GLFW.GLFW_KEY_G));
             KeyMapping.resetMapping();
         }, () -> true));
+    }
+
+    private void enterStance() throws Exception {
+        // 架势外的 G 会交给原版快捷操作，关闭它打开的界面后再从游戏中按 R。
+        if (client.gui.screen() != null) {
+            client.gui.setScreen(null);
+        }
+        keyTap(GLFW.GLFW_KEY_R);
     }
 
     private void enqueueInterruptions() {
@@ -178,9 +186,9 @@ final class CombatGuardClientTest {
         steps.add(new Step(style + "-contact", recording::hit, recording::hitPaid));
         steps.add(new Step(style + "-break", () -> {}, this::exhausted));
         steps.add(new Step(style + "-broken-message", () -> pressAgain(), () -> recording.message("broken")));
-        steps.add(new Step(style + "-wait-deadline", () -> {}, () -> tick - startTick >= GuardStaminaRecording.WAIT));
+        steps.add(new Step(style + "-wait-deadline", recording::stepPastBreak, recording::pastBreak));
         steps.add(new Step(style + "-weak-message", () -> pressAgain(), () -> recording.message("weak")));
-        steps.add(new Step(style + "-natural-recovery", () -> {}, recording::recovered));
+        steps.add(new Step(style + "-natural-recovery", recording::resumeTime, recording::recovered));
         steps.add(new Step(style + "-restart", () -> {
             key(GLFW.GLFW_KEY_G, GLFW.GLFW_RELEASE);
             startKeyboardGuard();

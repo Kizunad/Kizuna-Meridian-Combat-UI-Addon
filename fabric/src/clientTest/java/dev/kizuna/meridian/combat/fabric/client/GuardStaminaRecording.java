@@ -31,7 +31,6 @@ import java.util.function.Supplier;
 
 /** 真 G 验收用同一名玩家；每帧取真实客户端画面，费用只从集成服务端读取。 */
 public final class GuardStaminaRecording {
-    static final int WAIT = 40;
     private static final int FRAME_INTERVAL = 2;
     private static final double INITIAL_BUDGET = 41000;
     private static final double STRIKE_COST = 9000;
@@ -57,6 +56,7 @@ public final class GuardStaminaRecording {
             if (actionBar && message.getContents() instanceof TranslatableContents text
                     && !message.getString().equals(text.getKey())) {
                 overlay = text.getKey();
+                System.out.println("GUARD_OVERLAY " + overlay);
             }
         });
     }
@@ -248,8 +248,28 @@ public final class GuardStaminaRecording {
                         + "，命中后 " + HumanStamina.from(host().inspect().body()).availableJoules()
                         + "，守式 " + active.getSustained());
             }
+            // 把第二次按 G 固定在这笔破防上，慢帧不能跳过整段禁守。
+            deadline = TechniqueState.read(host().inspect().body()).getGuardBreakEndsOrThrow(FORM);
+            client.getSingleplayerServer().tickRateManager().setFrozen(true /* frozen */);
             return true;
         });
+    }
+
+    void stepPastBreak() {
+        // 走真实禁守时钟，期满时保留自然恢复后的余力。
+        var server = client.getSingleplayerServer();
+        work = server.submit(() -> {
+            long now = host().inspect().body().settledAt().elapsedMillis();
+            int ticks = Math.toIntExact(Math.ceilDiv(deadline - now, MILLIS_PER_TICK));
+            if (!server.tickRateManager().stepGameIfPaused(ticks)) {
+                throw new IllegalStateException("破防时钟未冻结");
+            }
+        });
+    }
+
+    boolean pastBreak() {
+        // 禁守截止以身体时钟为准，定位完成后再从客户端重新按键。
+        return ready() && poll(() -> host().inspect().body().settledAt().elapsedMillis() >= deadline);
     }
 
     boolean recovered() {

@@ -126,7 +126,7 @@ final class CombatKnownProjection {
                 .setIconId(presentation.getIconId())
                 .setCooldownEndTick(endTick)
                 .setCooldownTotalMillis(definition.getCooldownMillis())
-                .setGuard(definition.getEffectsList().stream().anyMatch(effect -> effect.hasGuard()))
+                .setGuard(CombatCasting.heldGuard(definition))
                 .setUnavailableReason(reason(failure));
         var reference = TechniqueReference.newBuilder()
                 .setId(definition.getId())
